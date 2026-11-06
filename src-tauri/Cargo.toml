@@ -13,9 +13,11 @@ name = "davis_lib"
 tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
+davis-ai = { path = "../crates/ai" }
 davis-core = { path = "../crates/core" }
 serde.workspace = true
 tauri = { version = "2.12.5", features = [] }
+tauri-plugin-opener = "2.7.2"
 thiserror.workspace = true
 
 [dev-dependencies]

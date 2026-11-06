@@ -16,7 +16,10 @@
         "width": 1200,
         "height": 800,
         "minWidth": 800,
-        "minHeight": 600
+        "minHeight": 640,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 17, "y": 26 }
       }
     ],
     "security": {
@@ -38,10 +41,15 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "Productivity",
+    "copyright": "Copyright 2026 The Davis Authors",
+    "shortDescription": "Explore large local data files with AI",
+    "longDescription": "Davis opens CSV and Parquet files too big for a spreadsheet, and answers questions about them with the AI you choose. Your files stay on your computer.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
     ]

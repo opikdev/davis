@@ -3,6 +3,8 @@ use serde::ser::{Serialize, SerializeStruct, Serializer};
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error(transparent)]
+    Ai(#[from] davis_ai::Error),
+    #[error(transparent)]
     Engine(#[from] davis_core::Error),
     #[error("Background task failed: {0}")]
     Task(#[from] tauri::Error),
@@ -11,6 +13,7 @@ pub enum AppError {
 impl AppError {
     fn kind(&self) -> &'static str {
         match self {
+            Self::Ai(error) => error.code(),
             Self::Engine(_) => "engine",
             Self::Task(_) => "task",
         }
