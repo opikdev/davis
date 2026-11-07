@@ -6,6 +6,8 @@ pub enum AppError {
     Ai(#[from] davis_ai::Error),
     #[error(transparent)]
     Engine(#[from] davis_core::Error),
+    #[error(transparent)]
+    Project(#[from] davis_project::Error),
     #[error("Background task failed: {0}")]
     Task(#[from] tauri::Error),
 }
@@ -15,6 +17,7 @@ impl AppError {
         match self {
             Self::Ai(error) => error.code(),
             Self::Engine(error) => error.code(),
+            Self::Project(error) => error.code(),
             Self::Task(_) => "task",
         }
     }

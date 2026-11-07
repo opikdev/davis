@@ -23,6 +23,16 @@ pub fn run() {
             commands::engine::engine_info,
             commands::engine::open_table,
             commands::engine::read_rows,
+            commands::project::add_project_file,
+            commands::project::create_project,
+            commands::project::delete_chat,
+            commands::project::last_project,
+            commands::project::open_project,
+            commands::project::read_chat,
+            commands::project::recent_projects,
+            commands::project::remove_project_file,
+            commands::project::rename_project,
+            commands::project::save_chat,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Davis");

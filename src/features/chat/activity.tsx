@@ -14,8 +14,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import type { AskStep } from "@/features/chat/api"
-import type { TimedStep, Turn } from "@/features/chat/use-chat"
+import type { AskStep, TimedStep, Turn } from "@/features/chat/api"
 import { cn } from "@/lib/utils"
 
 const KIND_ICONS: Record<AskStep["kind"], IconSvgElement> = {

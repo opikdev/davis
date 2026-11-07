@@ -6,8 +6,16 @@ import { toErrorMessage } from "@/lib/ipc-error"
 
 const EXTENSIONS = ["csv", "tsv", "txt", "gz", "parquet", "json", "jsonl"]
 
-function fileName(path: string) {
+export function fileName(path: string) {
   return path.split(/[\\/]/).pop() ?? path
+}
+
+export async function chooseFiles() {
+  const paths = await chooseFile({
+    multiple: true,
+    filters: [{ name: "Data files", extensions: EXTENSIONS }],
+  })
+  return paths ?? []
 }
 
 export function useOpenTable() {
@@ -15,28 +23,32 @@ export function useOpenTable() {
   const [openingName, setOpeningName] = useState<string>()
   const [error, setError] = useState<string>()
 
-  const open = useCallback(async (path: string) => {
-    setOpeningName(fileName(path))
+  const load = useCallback(
+    async (name: string, read: () => Promise<OpenedTable>) => {
+      setOpeningName(name)
+      setError(undefined)
+      try {
+        setTable(await read())
+        return true
+      } catch (failure) {
+        setError(toErrorMessage(failure))
+        return false
+      } finally {
+        setOpeningName(undefined)
+      }
+    },
+    []
+  )
+
+  const open = useCallback(
+    (path: string) => load(fileName(path), () => openTable(path)),
+    [load]
+  )
+
+  const close = useCallback(() => {
+    setTable(undefined)
     setError(undefined)
-    try {
-      const opened = await openTable(path)
-      setTable(opened)
-      return true
-    } catch (failure) {
-      setError(toErrorMessage(failure))
-      return false
-    } finally {
-      setOpeningName(undefined)
-    }
   }, [])
 
-  const browse = useCallback(async () => {
-    const path = await chooseFile({
-      multiple: false,
-      filters: [{ name: "Data files", extensions: EXTENSIONS }],
-    })
-    return path ? open(path) : undefined
-  }, [open])
-
-  return { table, openingName, error, open, browse }
+  return { table, openingName, error, load, open, close }
 }

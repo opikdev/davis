@@ -1,0 +1,12 @@
+[package]
+name = "davis-project"
+description = "Project folders for Davis, independent of any UI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json = "1"
+thiserror.workspace = true

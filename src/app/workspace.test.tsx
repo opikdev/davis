@@ -96,6 +96,29 @@ type Backend = {
   rows?: (args: unknown) => unknown
   ask?: (args: unknown) => unknown
   onStop?: (turn: unknown) => void
+  project?: ProjectFixture
+  saved?: SavedChatFixture[]
+  onSaveChat?: (chat: unknown) => void
+  commands?: string[]
+}
+
+type ProjectFixture = {
+  path: string
+  name: string
+  files: { name: string; path: string; sizeBytes: number }[]
+  chats: { id: string; title: string; updatedAt: number }[]
+}
+
+type SavedChatFixture = {
+  id: string
+  title: string
+  updatedAt: number
+  table: string | null
+  turns: unknown[]
+}
+
+function fileOf(table: { name: string; source: { path: string } }) {
+  return { name: table.name, path: table.source.path, sizeBytes: 4 }
 }
 
 function renderWorkspace({
@@ -108,9 +131,57 @@ function renderWorkspace({
   rows,
   ask,
   onStop,
+  project: existing,
+  saved = [],
+  onSaveChat,
+  commands,
 }: Backend = {}) {
+  let current = existing
+  const chats = [...saved]
+
   mockIPC((command, args) => {
     const payload = args as Record<string, unknown>
+    commands?.push(command)
+    if (command === "last_project") return existing ?? null
+    if (command === "recent_projects")
+      return current ? [{ path: current.path, name: current.name }] : []
+    if (command === "create_project") {
+      const name = payload.name as string
+      current = { path: `/docs/${name}`, name, files: [], chats: [] }
+      return current
+    }
+    if (command === "open_project") return { ...current }
+    if (command === "rename_project") {
+      const name = payload.name as string
+      const path = `/docs/${name}`
+      const files = (current?.files ?? []).map((file) => ({
+        ...file,
+        path: `${path}/data/${file.name}`,
+      }))
+      current = { path, name, files, chats: current?.chats ?? [] }
+      return current
+    }
+    if (command === "add_project_file") {
+      const table = openTable?.() as typeof SALES_TABLE
+      if (current) current.files = [fileOf(table)]
+      return table
+    }
+    if (command === "remove_project_file" && current) {
+      current.files = current.files.filter(({ name }) => name !== payload.name)
+      return undefined
+    }
+    if (command === "save_chat") {
+      const chat = payload.chat as SavedChatFixture
+      onSaveChat?.(chat)
+      if (current) current.chats = [chat]
+      return undefined
+    }
+    if (command === "read_chat")
+      return chats.find(({ id }) => id === payload.id)
+    if (command === "delete_chat" && current) {
+      current.chats = current.chats.filter(({ id }) => id !== payload.id)
+      return undefined
+    }
     if (command === "connected_providers") return connected()
     if (command === "list_models") return models(payload.providerId as string)
     if (command === "chosen_model") return chosen
@@ -333,7 +404,8 @@ const SALES_ANSWER = {
 
 async function renderOpenTable(
   ask: Backend["ask"],
-  onStop?: Backend["onStop"]
+  onStop?: Backend["onStop"],
+  extra: Backend = {}
 ) {
   renderWorkspace({
     connected: () => ["claude-code"],
@@ -341,6 +413,7 @@ async function renderOpenTable(
     rows: () => [["EMEA", "1200"]],
     ask,
     onStop,
+    ...extra,
   })
   dropFile("/data/sales.csv")
   await screen.findByText("1200")
@@ -356,7 +429,9 @@ test("asking shows the answer, its rows, and the query", async () => {
 
   await askQuestion("Sales by region?")
 
-  expect(await screen.findByText("Sales by region")).toBeTruthy()
+  expect(
+    await screen.findByRole("heading", { name: "Sales by region" })
+  ).toBeTruthy()
   expect(screen.getByText("Sales by region?")).toBeTruthy()
   expect(screen.getByText("1500")).toBeTruthy()
 })
@@ -402,7 +477,7 @@ test("the work is shown as it happens, then folds away", async () => {
   expect(screen.getByText("SELECT region")).toBeTruthy()
   expect(screen.getByRole("status").textContent).toContain("Writing query")
 
-  await screen.findByText("Sales by region")
+  await screen.findByRole("heading", { name: "Sales by region" })
   expect(screen.queryByText("Read columns")).toBeNull()
 
   await userEvent.click(screen.getByRole("button", { name: /Worked for/ }))
@@ -432,14 +507,242 @@ test("A stopped question shows no error", async () => {
   expect(screen.queryByRole("alert")).toBeNull()
 })
 
+const SAVED_PROJECT = {
+  path: "/docs/Q3",
+  name: "Q3",
+  files: [
+    { name: "other.csv", path: "/docs/Q3/data/other.csv", sizeBytes: 4 },
+    { name: "sales.csv", path: "/data/sales.csv", sizeBytes: 4 },
+  ],
+  chats: [{ id: "chat-1", title: "Sales by region", updatedAt: 5 }],
+}
+
+const SAVED_CHAT = {
+  id: "chat-1",
+  title: "Sales by region",
+  updatedAt: 5,
+  table: "sales.csv",
+  turns: [
+    {
+      id: 7,
+      question: "Sales by region?",
+      startedAt: 1,
+      finishedAt: 2,
+      steps: [],
+      answer: {
+        title: "Saved answer",
+        sql: null,
+        chart: null,
+        result: null,
+      },
+    },
+  ],
+}
+
+function projectBackend(extra: Backend = {}): Backend {
+  return {
+    project: structuredClone(SAVED_PROJECT),
+    saved: [SAVED_CHAT],
+    openTable: () => SALES_TABLE,
+    rows: () => [["EMEA", "1200"]],
+    connected: () => ["claude-code"],
+    ...extra,
+  }
+}
+
+test("a first file creates a project named after it", async () => {
+  renderWorkspace({
+    openTable: () => SALES_TABLE,
+    rows: () => [["EMEA", "1200"]],
+  })
+
+  dropFile("/Downloads/sales_2026.csv")
+  await screen.findByText("EMEA")
+
+  const nav = screen.getByRole("navigation", { name: "Main" })
+  expect(within(nav).getByText("sales_2026")).toBeTruthy()
+  expect(within(nav).getByRole("button", { name: "sales.csv" })).toBeTruthy()
+})
+
+test("a file Davis can't read leaves no project behind", async () => {
+  const commands: string[] = []
+  renderWorkspace({
+    commands,
+    openTable: () => {
+      throw { kind: "unsupported-file", message: "Davis can't open a.xlsx." }
+    },
+  })
+
+  dropFile("/data/a.xlsx")
+
+  await waitFor(() =>
+    expect(screen.getByRole("status").textContent).toBe(
+      "Davis can't open a.xlsx."
+    )
+  )
+  expect(commands).not.toContain("create_project")
+})
+
+test("files join the open project instead of starting a new one", async () => {
+  const commands: string[] = []
+  renderWorkspace(projectBackend({ commands }))
+  await screen.findByText("Saved answer")
+
+  dropFile("/data/sales.csv")
+  await waitFor(() => expect(commands).toContain("add_project_file"))
+
+  expect(commands).not.toContain("create_project")
+})
+
+test("every dropped file is added", async () => {
+  const commands: string[] = []
+  renderWorkspace({
+    commands,
+    openTable: () => SALES_TABLE,
+    rows: () => [["EMEA", "1200"]],
+  })
+
+  act(() =>
+    drops.send({
+      payload: {
+        type: "drop",
+        paths: ["/data/a.csv", "/data/b.csv"],
+        position: {},
+      },
+    })
+  )
+  await screen.findByText("EMEA")
+
+  expect(commands.filter((name) => name === "add_project_file")).toHaveLength(2)
+  expect(commands.filter((name) => name === "create_project")).toHaveLength(1)
+})
+
+test("reopening Davis brings back the project, its file and its chat", async () => {
+  renderWorkspace(projectBackend())
+
+  expect(await screen.findByText("Saved answer")).toBeTruthy()
+  expect(await screen.findByText("EMEA")).toBeTruthy()
+  expect(screen.getByRole("heading", { name: "sales.csv" })).toBeTruthy()
+  const nav = screen.getByRole("navigation", { name: "Main" })
+  expect(within(nav).getByText("Q3")).toBeTruthy()
+})
+
+test("a finished answer is saved under its title", async () => {
+  const onSaveChat = vi.fn()
+  await renderOpenTable(() => SALES_ANSWER, undefined, { onSaveChat })
+
+  await askQuestion("Sales?")
+  await screen.findByRole("heading", { name: "Sales by region" })
+
+  await waitFor(() => expect(onSaveChat).toHaveBeenCalled())
+  expect(onSaveChat.mock.lastCall?.[0]).toMatchObject({
+    title: "Sales by region",
+    table: "sales.csv",
+    turns: [{ question: "Sales?" }],
+  })
+  expect(
+    await screen.findByRole("button", { name: "Delete Sales by region" })
+  ).toBeTruthy()
+})
+
+test("opening a saved chat does not save it again", async () => {
+  const onSaveChat = vi.fn()
+  renderWorkspace(projectBackend({ onSaveChat }))
+
+  await screen.findByText("Saved answer")
+
+  expect(onSaveChat).not.toHaveBeenCalled()
+})
+
+test("a chat that can't be saved says so", async () => {
+  await renderOpenTable(() => SALES_ANSWER, undefined, {
+    onSaveChat: () => {
+      throw { kind: "project-storage", message: "The disk is full." }
+    },
+  })
+
+  await askQuestion("Sales?")
+
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "This chat couldn't be saved. The disk is full."
+  )
+})
+
+test("renaming a project keeps the open file and chat working", async () => {
+  const onRead = vi.fn()
+  renderWorkspace(
+    projectBackend({
+      rows: (args) => {
+        onRead(args)
+        return [["EMEA", "1200"]]
+      },
+    })
+  )
+  await screen.findByText("Saved answer")
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Choose a project" })
+  )
+  await userEvent.click(
+    await screen.findByRole("menuitem", { name: "Rename project" })
+  )
+  const name = await screen.findByLabelText("Name")
+  await userEvent.clear(name)
+  await userEvent.type(name, "Q4{Enter}")
+
+  const nav = screen.getByRole("navigation", { name: "Main" })
+  expect(await within(nav).findByText("Q4")).toBeTruthy()
+  expect(screen.getByText("Saved answer")).toBeTruthy()
+})
+
+test("removing a file asks first, then opens the next one", async () => {
+  const commands: string[] = []
+  renderWorkspace(projectBackend({ commands }))
+  await screen.findByText("Saved answer")
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Remove sales.csv" })
+  )
+  expect(screen.getByText("Remove sales.csv?")).toBeTruthy()
+  await userEvent.click(screen.getByRole("button", { name: "Keep it" }))
+  expect(commands).not.toContain("remove_project_file")
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Remove sales.csv" })
+  )
+  await userEvent.click(screen.getByRole("button", { name: "Remove file" }))
+
+  await waitFor(() => expect(commands).toContain("remove_project_file"))
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "sales.csv" })).toBeNull()
+  )
+})
+
+test("deleting the open chat starts a fresh one", async () => {
+  renderWorkspace(projectBackend())
+  await screen.findByText("Saved answer")
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Delete Sales by region" })
+  )
+  await userEvent.click(screen.getByRole("button", { name: "Delete chat" }))
+
+  await waitFor(() => expect(screen.queryByText("Saved answer")).toBeNull())
+})
+
 test("New chat starts over", async () => {
   await renderOpenTable(() => SALES_ANSWER)
   await askQuestion("Sales?")
-  await screen.findByText("Sales by region")
+  await screen.findByRole("heading", { name: "Sales by region" })
 
-  await userEvent.click(screen.getByRole("button", { name: "New chat" }))
+  await userEvent.click(
+    within(screen.getByRole("complementary", { name: "Ask AI" })).getByRole(
+      "button",
+      { name: "New chat" }
+    )
+  )
 
-  expect(screen.queryByText("Sales by region")).toBeNull()
+  expect(screen.queryByRole("heading", { name: "Sales by region" })).toBeNull()
 })
 
 test("only the question, column names, and earlier queries are sent", async () => {
@@ -447,7 +750,7 @@ test("only the question, column names, and earlier queries are sent", async () =
   await renderOpenTable(ask)
 
   await askQuestion("First?")
-  await screen.findByText("Sales by region")
+  await screen.findByRole("heading", { name: "Sales by region" })
   await askQuestion("Second?")
   await waitFor(() => expect(ask).toHaveBeenCalledTimes(2))
 
@@ -493,7 +796,9 @@ test("an answer with no query still explains itself", async () => {
 
   await askQuestion("Sales by month?")
 
-  expect(await screen.findByText("This file has no date column")).toBeTruthy()
+  expect(
+    await screen.findByRole("heading", { name: "This file has no date column" })
+  ).toBeTruthy()
 })
 
 test("a failed question explains why and can be retried", async () => {
@@ -511,7 +816,9 @@ test("a failed question explains why and can be retried", async () => {
   isDown = false
   await userEvent.click(screen.getByRole("button", { name: "Try again" }))
 
-  expect(await screen.findByText("Sales by region")).toBeTruthy()
+  expect(
+    await screen.findByRole("heading", { name: "Sales by region" })
+  ).toBeTruthy()
   report.mockRestore()
 })
 
@@ -529,12 +836,16 @@ test("Shift and Enter adds a line instead of sending", async () => {
 test("the chat survives a visit to another section", async () => {
   await renderOpenTable(() => SALES_ANSWER)
   await askQuestion("Sales?")
-  await screen.findByText("Sales by region")
+  await screen.findByRole("heading", { name: "Sales by region" })
 
   await userEvent.click(screen.getByRole("button", { name: "Pages" }))
-  await userEvent.click(screen.getByRole("button", { name: "Data" }))
+  await userEvent.click(
+    await screen.findByRole("button", { name: "sales.csv" })
+  )
 
-  expect(screen.getByText("Sales by region")).toBeTruthy()
+  expect(
+    await screen.findByRole("heading", { name: "Sales by region" })
+  ).toBeTruthy()
 })
 
 test("Ask AI shows it's on, and turns the chat off and back", async () => {
@@ -580,7 +891,7 @@ test("a saved model is not replaced while it loads", async () => {
 })
 
 test("Browse files opens the chosen file", async () => {
-  chooseFile.mockResolvedValue("/data/sales.csv")
+  chooseFile.mockResolvedValue(["/data/sales.csv"])
   renderWorkspace({
     openTable: () => SALES_TABLE,
     rows: () => [["EMEA", "1"]],
@@ -645,9 +956,6 @@ test("a read failure can be retried", async () => {
 
 test("the sidebar opens each section", async () => {
   renderWorkspace()
-
-  await userEvent.click(screen.getByRole("button", { name: "Data" }))
-  expect(screen.getByText("No data yet")).toBeTruthy()
 
   await userEvent.click(screen.getByRole("button", { name: "Pages" }))
   expect(screen.getByText("No pages yet")).toBeTruthy()

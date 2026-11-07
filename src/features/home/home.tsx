@@ -71,12 +71,19 @@ function SourceCard({
 
 type HomeProps = {
   isDragging: boolean
+  projectName?: string
   openingName?: string
   error?: string
   onBrowse: () => void
 }
 
-export function Home({ isDragging, openingName, error, onBrowse }: HomeProps) {
+export function Home({
+  isDragging,
+  projectName,
+  openingName,
+  error,
+  onBrowse,
+}: HomeProps) {
   const [notice, setNotice] = useState("")
   const showNotReady = () => setNotice(NOT_READY)
   const title = openingName
@@ -116,7 +123,9 @@ export function Home({ isDragging, openingName, error, onBrowse }: HomeProps) {
             </span>
           </h1>
           <p className="text-muted-foreground">
-            CSV, Parquet, or JSON. They stay on this computer.
+            {projectName
+              ? `CSV, Parquet, or JSON. Copied into ${projectName}, and your originals stay as they are.`
+              : "CSV, Parquet, or JSON. They stay on this computer."}
           </p>
           <Button
             onClick={onBrowse}

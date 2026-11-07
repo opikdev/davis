@@ -17,7 +17,8 @@ import {
 import { ModelPicker } from "@/features/ai-setup"
 import { Activity } from "@/features/chat/activity"
 import { AnswerView } from "@/features/chat/answer-view"
-import type { Turn, useChat } from "@/features/chat/use-chat"
+import type { Turn } from "@/features/chat/api"
+import type { useChat } from "@/features/chat/use-chat"
 import type { Column, OpenedTable } from "@/features/data"
 
 function readable(name: string) {
@@ -98,7 +99,7 @@ type ChatPanelProps = {
 }
 
 export function ChatPanel({ table, chat }: ChatPanelProps) {
-  const { turns, isAsking, ask, retry, stop, clear } = chat
+  const { turns, saveError, isAsking, ask, retry, stop, clear } = chat
   const [question, setQuestion] = useState("")
   const conversation = useRef<HTMLDivElement>(null)
   const canSend = question.trim().length > 0 && !isAsking
@@ -143,6 +144,11 @@ export function ChatPanel({ table, chat }: ChatPanelProps) {
           turns.map((turn) => (
             <TurnView key={turn.id} turn={turn} onRetry={() => retry(turn)} />
           ))
+        )}
+        {saveError && (
+          <p role="alert" className="text-xs text-destructive select-text">
+            This chat couldn't be saved. {saveError}
+          </p>
         )}
       </div>
       <div className="shrink-0 p-2 pt-0">

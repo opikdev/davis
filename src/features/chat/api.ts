@@ -33,6 +33,30 @@ export type AskStep = {
   body: string | null
 }
 
+export type TimedStep = AskStep & {
+  startedAt: number
+  finishedAt?: number
+}
+
+export type Turn = {
+  id: number
+  question: string
+  startedAt: number
+  finishedAt?: number
+  steps: TimedStep[]
+  answer?: TableAnswer
+  error?: string
+  isStopped?: boolean
+}
+
+export type SavedChat = {
+  id: string
+  title: string
+  updatedAt: number
+  table: string | null
+  turns: Turn[]
+}
+
 export function askAboutTable(
   turn: number,
   source: TableSource,
@@ -55,4 +79,16 @@ export function askAboutTable(
 
 export function stopAsking(turn: number) {
   return invoke<void>("stop_asking", { turn })
+}
+
+export function saveChat(project: string, chat: SavedChat) {
+  return invoke<void>("save_chat", { project, chat })
+}
+
+export function readChat(project: string, id: string) {
+  return invoke<SavedChat>("read_chat", { project, id })
+}
+
+export function deleteChat(project: string, id: string) {
+  return invoke<void>("delete_chat", { project, id })
 }

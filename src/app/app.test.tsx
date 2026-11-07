@@ -44,6 +44,8 @@ function mockBackend(onboardingStatus: () => unknown) {
     if (command === "detect_ai_tools")
       return { apps: [], localServers: [], hasNpm: true }
     if (command === "connected_providers") return []
+    if (command === "recent_projects") return []
+    if (command === "last_project") return null
     return undefined
   })
   return commands

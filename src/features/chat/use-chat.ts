@@ -2,28 +2,15 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import {
   askAboutTable,
+  readChat,
+  saveChat,
   stopAsking,
   type AskStep,
-  type TableAnswer,
+  type TimedStep,
+  type Turn,
 } from "@/features/chat/api"
 import type { OpenedTable } from "@/features/data"
 import { errorKind, toErrorMessage } from "@/lib/ipc-error"
-
-export type TimedStep = AskStep & {
-  startedAt: number
-  finishedAt?: number
-}
-
-export type Turn = {
-  id: number
-  question: string
-  startedAt: number
-  finishedAt?: number
-  steps: TimedStep[]
-  answer?: TableAnswer
-  error?: string
-  isStopped?: boolean
-}
 
 function mergeStep(steps: TimedStep[], step: AskStep, now: number) {
   const known = steps.find(({ id }) => id === step.id)
@@ -61,11 +48,37 @@ function useStepBuffer(onFlush: (id: number, steps: AskStep[]) => void) {
   return { add, flush }
 }
 
-export function useChat(table: OpenedTable | undefined) {
+export function useChat(
+  project: string | undefined,
+  table: OpenedTable | undefined,
+  onSaved: (project: string) => void
+) {
   const [turns, setTurns] = useState<Turn[]>([])
+  const [chatId, setChatId] = useState<string>()
+  const [saveError, setSaveError] = useState<string>()
+  const savedTurns = useRef(turns)
   const nextId = useRef(1)
   const activeId = turns.find((turn) => !turn.finishedAt)?.id
   const isAsking = activeId !== undefined
+
+  useEffect(() => {
+    if (!project || !chatId || isAsking) return
+    if (turns.length === 0 || turns === savedTurns.current) return
+    savedTurns.current = turns
+    const [first] = turns
+    saveChat(project, {
+      id: chatId,
+      title: first.answer?.title ?? first.question,
+      updatedAt: Date.now(),
+      table: table?.name ?? null,
+      turns,
+    })
+      .then(() => {
+        setSaveError(undefined)
+        onSaved(project)
+      })
+      .catch((failure: unknown) => setSaveError(toErrorMessage(failure)))
+  }, [chatId, isAsking, onSaved, project, table?.name, turns])
 
   const update = useCallback(
     (id: number, change: (turn: Turn) => Partial<Turn>) =>
@@ -134,6 +147,7 @@ export function useChat(table: OpenedTable | undefined) {
     (question: string) => {
       const id = nextId.current
       nextId.current += 1
+      setChatId((current) => current ?? crypto.randomUUID())
       setTurns((current) => [
         ...current,
         { id, question, steps: [], startedAt: Date.now() },
@@ -165,11 +179,32 @@ export function useChat(table: OpenedTable | undefined) {
     )
   }, [activeId, update])
 
-  const clear = useCallback(() => setTurns([]), [])
+  const clear = useCallback(() => {
+    savedTurns.current = []
+    setTurns([])
+    setChatId(undefined)
+    setSaveError(undefined)
+  }, [])
 
-  // A conversation belongs to one file.
-  const path = table?.source.path
-  useEffect(() => setTurns([]), [path])
+  const open = useCallback(async (projectPath: string, id: string) => {
+    const chat = await readChat(projectPath, id)
+    savedTurns.current = chat.turns
+    nextId.current = Math.max(0, ...chat.turns.map((turn) => turn.id)) + 1
+    setTurns(chat.turns)
+    setChatId(id)
+    setSaveError(undefined)
+    return chat
+  }, [])
 
-  return { turns, isAsking, ask, retry, stop, clear }
+  return {
+    turns,
+    chatId,
+    saveError,
+    isAsking,
+    ask,
+    retry,
+    stop,
+    clear,
+    open,
+  }
 }
