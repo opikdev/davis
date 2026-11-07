@@ -18,6 +18,7 @@ import type { Figure, QueryResult } from "@/features/chat/api"
 
 const LONG_LABEL = 7
 const MANY_BARS = 12
+const MAX_BAR_SIZE = 28
 
 const compactNumber = new Intl.NumberFormat(undefined, {
   notation: "compact",
@@ -40,11 +41,12 @@ function chartPoints({ x, y }: Figure, result: QueryResult) {
 type AnswerChartProps = {
   figure: Figure
   result: QueryResult
+  fill?: boolean
 }
 
-export function AnswerChart({ figure, result }: AnswerChartProps) {
+export function AnswerChart({ figure, result, fill }: AnswerChartProps) {
   const points = chartPoints(figure, result)
-  if (points.length < 2) return null
+  if (points.length < (fill ? 1 : 2)) return null
 
   const config = {
     value: { label: figure.y ?? "", color: "var(--chart-1)" },
@@ -59,7 +61,7 @@ export function AnswerChart({ figure, result }: AnswerChartProps) {
     <ChartContainer
       config={config}
       className="aspect-auto w-full"
-      style={{ height }}
+      style={{ height: fill ? "100%" : height }}
       role="img"
       aria-label={figure.title}
     >
@@ -109,6 +111,7 @@ export function AnswerChart({ figure, result }: AnswerChartProps) {
           <Bar
             dataKey="value"
             fill="var(--color-value)"
+            maxBarSize={MAX_BAR_SIZE}
             radius={4}
             isAnimationActive={false}
           />
@@ -137,6 +140,7 @@ export function AnswerChart({ figure, result }: AnswerChartProps) {
           <Bar
             dataKey="value"
             fill="var(--color-value)"
+            maxBarSize={MAX_BAR_SIZE}
             radius={[4, 4, 0, 0]}
             isAnimationActive={false}
           />

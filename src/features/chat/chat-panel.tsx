@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/input-group"
 import { ModelPicker } from "@/features/ai-setup"
 import { Activity } from "@/features/chat/activity"
-import { AnswerView } from "@/features/chat/answer-view"
+import { AnswerView, type FigureAction } from "@/features/chat/answer-view"
 import type { AgentAnswer, Turn } from "@/features/chat/api"
 import { fillReferences } from "@/features/chat/references"
 import type { useChat } from "@/features/chat/use-chat"
@@ -85,6 +85,7 @@ type TurnViewProps = {
   isLast: boolean
   onRetry: (turn: Turn) => void
   onAsk: (question: string) => void
+  figureAction?: FigureAction
 }
 
 const TurnView = memo(function TurnView({
@@ -92,6 +93,7 @@ const TurnView = memo(function TurnView({
   isLast,
   onRetry,
   onAsk,
+  figureAction,
 }: TurnViewProps) {
   const { question, answer, error, finishedAt } = turn
   const followUps = isLast ? (answer?.followUps ?? []) : []
@@ -107,7 +109,7 @@ const TurnView = memo(function TurnView({
         {question}
       </p>
       <Activity turn={turn} />
-      {answer && <AnswerView answer={answer} />}
+      {answer && <AnswerView answer={answer} figureAction={figureAction} />}
       {error && (
         <div role="alert" className="flex flex-col items-start gap-1.5">
           <p className="text-destructive select-text">{error}</p>
@@ -148,25 +150,42 @@ const TurnView = memo(function TurnView({
   )
 })
 
+const PAGE_SUGGESTIONS = [
+  "Build an overview of this data",
+  "Add the main numbers at the top",
+]
+
 type EmptyChatProps = {
-  table: OpenedTable
+  table?: OpenedTable
+  pageTitle?: string
   profile?: ColumnProfile[]
   onAsk: (question: string) => void
 }
 
-function EmptyChat({ table, profile, onAsk }: EmptyChatProps) {
+function EmptyChat({ table, pageTitle, profile, onAsk }: EmptyChatProps) {
+  const suggestions = pageTitle
+    ? PAGE_SUGGESTIONS
+    : suggestionsFor(table?.columns ?? [])
+
   return (
     <div className="flex flex-1 flex-col justify-center gap-3 px-1">
       <div className="flex flex-col gap-1 leading-relaxed">
-        <h2 className="truncate text-foreground">{table.name}</h2>
-        {briefLines(table, profile).map((line) => (
-          <p key={line} className="animate-fade text-muted-foreground">
-            {line}
+        <h2 className="truncate text-foreground">{pageTitle ?? table?.name}</h2>
+        {pageTitle ? (
+          <p className="text-muted-foreground">
+            Say what this Page should show, and the AI will build it here.
           </p>
-        ))}
+        ) : (
+          table &&
+          briefLines(table, profile).map((line) => (
+            <p key={line} className="animate-fade text-muted-foreground">
+              {line}
+            </p>
+          ))
+        )}
       </div>
       <div className="flex w-full flex-col gap-1">
-        {suggestionsFor(table.columns).map((suggestion) => (
+        {suggestions.map((suggestion) => (
           <Button
             key={suggestion}
             variant="outline"
@@ -186,12 +205,20 @@ function EmptyChat({ table, profile, onAsk }: EmptyChatProps) {
 }
 
 type ChatPanelProps = {
-  table: OpenedTable
+  table?: OpenedTable
+  pageTitle?: string
   profile?: ColumnProfile[]
+  figureAction?: FigureAction
   chat: ReturnType<typeof useChat>
 }
 
-export function ChatPanel({ table, profile, chat }: ChatPanelProps) {
+export function ChatPanel({
+  table,
+  pageTitle,
+  profile,
+  figureAction,
+  chat,
+}: ChatPanelProps) {
   const { turns, saveError, isAsking, ask, retry, reply, stop, clear } = chat
   const [question, setQuestion] = useState("")
   const { attach, isFollowing, jumpToEnd, onScroll, onWheel } = useFollow()
@@ -254,7 +281,12 @@ export function ChatPanel({ table, profile, chat }: ChatPanelProps) {
         >
           <div className="flex min-h-full flex-col gap-5 px-3 py-4">
             {turns.length === 0 ? (
-              <EmptyChat table={table} profile={profile} onAsk={startTurn} />
+              <EmptyChat
+                table={table}
+                pageTitle={pageTitle}
+                profile={profile}
+                onAsk={startTurn}
+              />
             ) : (
               turns.map((turn, index) => (
                 <TurnView
@@ -263,6 +295,7 @@ export function ChatPanel({ table, profile, chat }: ChatPanelProps) {
                   isLast={index === turns.length - 1}
                   onRetry={retry}
                   onAsk={startTurn}
+                  figureAction={figureAction}
                 />
               ))
             )}

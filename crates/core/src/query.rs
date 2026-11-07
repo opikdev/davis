@@ -14,10 +14,72 @@ const MAX_RESULT_ROWS: usize = 1_000;
 const QUERY_TIME_LIMIT: Duration = Duration::from_secs(60);
 const STOP_CHECK: Duration = Duration::from_millis(50);
 
+// A filter on one table also narrows the tables that link to it, so
+// "region = EMEA" on customers reaches a total worked out from orders alone.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkedFilter {
+    pub source: TableSource,
+    pub key: String,
+    pub column: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableFilter {
+    pub column: String,
+    pub values: Vec<String>,
+    pub through: Option<LinkedFilter>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryTable {
     pub name: String,
     pub source: TableSource,
+    pub filters: Vec<TableFilter>,
+}
+
+impl QueryTable {
+    pub fn new(name: impl Into<String>, source: TableSource) -> Self {
+        Self {
+            name: name.into(),
+            source,
+            filters: Vec::new(),
+        }
+    }
+}
+
+fn quoted_name(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+// Filtering the table itself means every query over it agrees, aggregates included.
+fn filter_clause(filters: &[TableFilter]) -> String {
+    let conditions: Vec<String> = filters
+        .iter()
+        .filter(|filter| !filter.values.is_empty())
+        .map(|filter| {
+            let values = filter
+                .values
+                .iter()
+                .map(|value| quoted(value))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let column = quoted_name(&filter.column);
+            match &filter.through {
+                None => format!("{column}::VARCHAR IN ({values})"),
+                Some(link) => format!(
+                    "{column}::VARCHAR IN (SELECT {}::VARCHAR FROM {} WHERE {}::VARCHAR IN ({values}))",
+                    quoted_name(&link.key),
+                    scan(&link.source, false),
+                    quoted_name(&link.column),
+                ),
+            }
+        })
+        .collect();
+    if conditions.is_empty() {
+        String::new()
+    } else {
+        format!(" WHERE {}", conditions.join(" AND "))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,9 +161,10 @@ pub(crate) fn locked_connection(tables: &[QueryTable]) -> Result<Connection> {
         .iter()
         .map(|table| {
             format!(
-                "CREATE VIEW \"{}\" AS SELECT * FROM {};\n",
+                "CREATE VIEW \"{}\" AS SELECT * FROM {}{};\n",
                 table.name.replace('"', "\"\""),
-                scan(&table.source, false)
+                scan(&table.source, false),
+                filter_clause(&table.filters)
             )
         })
         .collect();
@@ -238,10 +301,7 @@ mod tests {
     }
 
     fn data_table(source: &TableSource) -> Vec<QueryTable> {
-        vec![QueryTable {
-            name: "data".to_owned(),
-            source: source.clone(),
-        }]
+        vec![QueryTable::new("data", source.clone())]
     }
 
     fn ask(source: &TableSource, sql: &str) -> Result<QueryResult> {
@@ -250,10 +310,7 @@ mod tests {
 
     fn table(folder: &Folder, name: &str, content: &str) -> QueryTable {
         let path = folder.write(&format!("{name}.csv"), content);
-        QueryTable {
-            name: name.to_owned(),
-            source: open_table(&path).unwrap().source,
-        }
+        QueryTable::new(name, open_table(&path).unwrap().source)
     }
 
     fn code(source: &TableSource, sql: &str) -> &'static str {
@@ -456,6 +513,114 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(fs::read_to_string(&target).unwrap(), "a\n2\n");
+    }
+
+    #[test]
+    fn a_filter_narrows_every_aggregate_over_that_table() {
+        let folder = Folder::new("filter");
+        let mut sales = table(
+            &folder,
+            "sales",
+            "region,amount\nEMEA,10\nEMEA,5\nAPAC,20\n",
+        );
+        sales.filters = vec![TableFilter {
+            column: "region".to_owned(),
+            values: vec!["EMEA".to_owned()],
+            through: None,
+        }];
+
+        let result = run_query(
+            &[sales],
+            "SELECT sum(amount) AS total, count(*) AS n FROM sales",
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert_eq!(result.rows, [[Some("15".to_owned()), Some("2".to_owned())]]);
+    }
+
+    #[test]
+    fn a_filter_reaches_queries_that_join_the_table() {
+        let folder = Folder::new("filter-join");
+        let mut customers = table(&folder, "customers", "id,region\n1,EMEA\n2,APAC\n");
+        customers.filters = vec![TableFilter {
+            column: "region".to_owned(),
+            values: vec!["APAC".to_owned()],
+            through: None,
+        }];
+        let orders = table(&folder, "orders", "customer,amount\n1,10\n2,20\n2,5\n");
+
+        let result = run_query(
+            &[orders, customers],
+            "SELECT sum(amount) FROM orders JOIN customers ON customer = id",
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert_eq!(result.rows, [[Some("25".to_owned())]]);
+    }
+
+    #[test]
+    fn a_filter_follows_a_link_to_a_table_that_never_joins_it() {
+        let folder = Folder::new("filter-link");
+        let customers = table(&folder, "customers", "id,region\n1,EMEA\n2,APAC\n3,EMEA\n");
+        let mut orders = table(&folder, "orders", "customer,amount\n1,10\n2,20\n3,5\n");
+        orders.filters = vec![TableFilter {
+            column: "customer".to_owned(),
+            values: vec!["EMEA".to_owned()],
+            through: Some(LinkedFilter {
+                source: customers.source.clone(),
+                key: "id".to_owned(),
+                column: "region".to_owned(),
+            }),
+        }];
+
+        let result = run_query(
+            &[orders, customers],
+            "SELECT sum(amount) FROM orders",
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert_eq!(result.rows, [[Some("15".to_owned())]]);
+    }
+
+    #[test]
+    fn a_filter_with_nothing_chosen_keeps_every_row() {
+        let folder = Folder::new("filter-none");
+        let mut sales = table(&folder, "sales", "region\nEMEA\nAPAC\n");
+        sales.filters = vec![TableFilter {
+            column: "region".to_owned(),
+            values: Vec::new(),
+            through: None,
+        }];
+
+        let result = run_query(
+            &[sales],
+            "SELECT * FROM sales",
+            Arc::new(AtomicBool::new(false)),
+        );
+
+        assert_eq!(result.unwrap().rows.len(), 2);
+    }
+
+    #[test]
+    fn a_filter_value_cannot_break_out_of_the_query() {
+        let folder = Folder::new("filter-quote");
+        let mut sales = table(&folder, "sales", "region\nO'Brien\nAPAC\n");
+        sales.filters = vec![TableFilter {
+            column: "region".to_owned(),
+            values: vec!["O'Brien".to_owned(), "x'); DROP VIEW sales; --".to_owned()],
+            through: None,
+        }];
+
+        let result = run_query(
+            &[sales],
+            "SELECT * FROM sales",
+            Arc::new(AtomicBool::new(false)),
+        );
+
+        assert_eq!(result.unwrap().rows, [[Some("O'Brien".to_owned())]]);
     }
 
     #[test]

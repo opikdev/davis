@@ -4,6 +4,8 @@ pub enum AgentError {
     Ai(#[from] davis_ai::Error),
     #[error(transparent)]
     Engine(#[from] davis_core::Error),
+    #[error(transparent)]
+    Project(#[from] davis_project::Error),
 }
 
 impl AgentError {
@@ -11,6 +13,7 @@ impl AgentError {
         match self {
             Self::Ai(error) => error.code(),
             Self::Engine(error) => error.code(),
+            Self::Project(error) => error.code(),
         }
     }
 }

@@ -34,6 +34,19 @@ vi.mock("@/components/ui/resizable", () => ({
   ResizableHandle: () => null,
 }))
 
+// The grid measures real layout too.
+vi.mock("react-grid-layout", () => ({
+  default: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  useContainerWidth: () => ({
+    width: 800,
+    containerRef: { current: null },
+    mounted: true,
+  }),
+  verticalCompactor: {},
+}))
+
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: chooseFile }))
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText }))
 
@@ -103,6 +116,8 @@ type Backend = {
   values?: (args: unknown) => unknown
   links?: () => unknown
   onCombine?: (args: unknown) => unknown
+  pages?: PageFixture[]
+  onRunPage?: (page: unknown) => void
   project?: ProjectFixture
   saved?: SavedChatFixture[]
   onSaveChat?: (chat: unknown) => void
@@ -114,6 +129,7 @@ type ProjectFixture = {
   name: string
   files: { name: string; path: string; sizeBytes: number }[]
   chats: { id: string; title: string; updatedAt: number }[]
+  pages: { id: string; title: string; updatedAt: number }[]
 }
 
 type SavedChatFixture = {
@@ -122,6 +138,69 @@ type SavedChatFixture = {
   updatedAt: number
   table: string | null
   turns: unknown[]
+}
+
+type BlockFixture = {
+  id: string
+  kind: string
+  title: string
+  sql: string | null
+  view: string | null
+  xColumn: string | null
+  yColumn: string | null
+  text: string | null
+  table: string | null
+  column: string | null
+  values: string[]
+}
+
+type PageFixture = {
+  id: string
+  title: string
+  updatedAt: number
+  blocks: BlockFixture[]
+}
+
+const BLANK_BLOCK = {
+  kind: "text",
+  x: 0,
+  y: 0,
+  w: 6,
+  h: 8,
+  title: "",
+  sql: null,
+  view: null,
+  xColumn: null,
+  yColumn: null,
+  text: null,
+  table: null,
+  column: null,
+  values: [],
+}
+
+function pageResult(block: BlockFixture) {
+  if (block.sql === "BROKEN") {
+    return { id: block.id, result: null, error: "That query failed." }
+  }
+  if (block.sql === "EMPTY") {
+    return {
+      id: block.id,
+      error: null,
+      result: { columns: [], rows: [], isTruncated: false },
+    }
+  }
+  return {
+    id: block.id,
+    error: null,
+    result: {
+      columns: [
+        { name: "region", dataType: "VARCHAR", kind: "text" },
+        { name: "total", dataType: "BIGINT", kind: "number" },
+      ],
+      rows: [["EMEA", "1500"]],
+      isTruncated: false,
+    },
+  }
 }
 
 function fileOf(table: { name: string; source: { path: string } }) {
@@ -143,17 +222,58 @@ function renderWorkspace({
   values,
   links,
   onCombine,
+  pages = [],
+  onRunPage,
   project: existing,
   saved = [],
   onSaveChat,
   commands,
 }: Backend = {}) {
   let current = existing
+  const savedPages = new Map(pages.map((page) => [page.id, page]))
   const chats = [...saved]
 
   mockIPC((command, args) => {
     const payload = args as Record<string, unknown>
     commands?.push(command)
+    if (command === "save_page") {
+      const page = payload.page as PageFixture
+      savedPages.set(page.id, page)
+      if (current) current.pages = [...savedPages.values()]
+      return undefined
+    }
+    if (command === "read_page") return savedPages.get(payload.id as string)
+    if (command === "delete_page") {
+      savedPages.delete(payload.id as string)
+      if (current) current.pages = [...savedPages.values()]
+      return undefined
+    }
+    if (command === "add_block") {
+      const page = savedPages.get(payload.id as string) as PageFixture
+      const block = {
+        ...BLANK_BLOCK,
+        id: `b${page.blocks.length}`,
+        ...(payload.block as object),
+      }
+      const next = { ...page, blocks: [...page.blocks, block] }
+      savedPages.set(page.id, next)
+      return next
+    }
+    if (command === "run_page") {
+      onRunPage?.(payload.page)
+      const page = payload.page as PageFixture
+      return {
+        blocks: page.blocks.flatMap((block) =>
+          block.sql ? [pageResult(block)] : []
+        ),
+        filters: page.blocks.flatMap((block) =>
+          block.values.length > 0
+            ? [{ id: block.id, files: ["sales.csv", "orders.csv"] }]
+            : []
+        ),
+      }
+    }
+    if (command === "filter_options") return ["EMEA", "APAC"]
     if (command === "data_files_in") return payload.paths
     if (command === "check_data_file") return openTable?.()
     if (command === "profile_table") return profile?.()
@@ -165,7 +285,7 @@ function renderWorkspace({
       return current ? [{ path: current.path, name: current.name }] : []
     if (command === "create_project") {
       const name = payload.name as string
-      current = { path: `/docs/${name}`, name, files: [], chats: [] }
+      current = { path: `/docs/${name}`, name, files: [], chats: [], pages: [] }
       return current
     }
     if (command === "open_project") return { ...current }
@@ -176,7 +296,13 @@ function renderWorkspace({
         ...file,
         path: `${path}/data/${file.name}`,
       }))
-      current = { path, name, files, chats: current?.chats ?? [] }
+      current = {
+        path,
+        name,
+        files,
+        chats: current?.chats ?? [],
+        pages: current?.pages ?? [],
+      }
       return current
     }
     if (command === "add_project_file") {
@@ -685,6 +811,7 @@ const SAVED_PROJECT = {
     { name: "sales.csv", path: "/data/sales.csv", sizeBytes: 4 },
   ],
   chats: [{ id: "chat-1", title: "Sales by region", updatedAt: 5 }],
+  pages: [],
 }
 
 const SAVED_CHAT = {
@@ -1052,6 +1179,248 @@ test("links from other files aren't offered on this one", async () => {
   )
 })
 
+const OVERVIEW: PageFixture = {
+  id: "page-1",
+  title: "Overview",
+  updatedAt: 1,
+  blocks: [
+    {
+      ...BLANK_BLOCK,
+      id: "b1",
+      kind: "figure",
+      title: "Totals",
+      sql: "SELECT 1",
+      view: "table",
+    },
+    {
+      ...BLANK_BLOCK,
+      id: "b2",
+      kind: "figure",
+      title: "Broken one",
+      sql: "BROKEN",
+      view: "table",
+    },
+    {
+      ...BLANK_BLOCK,
+      id: "b3",
+      kind: "filter",
+      title: "region",
+      table: "sales.csv",
+      column: "region",
+    },
+  ],
+}
+
+function pageBackend(extra: Backend = {}) {
+  return projectBackend({
+    project: {
+      ...structuredClone(SAVED_PROJECT),
+      pages: [{ id: "page-1", title: "Overview", updatedAt: 1 }],
+    },
+    pages: [structuredClone(OVERVIEW)],
+    ...extra,
+  })
+}
+
+async function startNewChat() {
+  const nav = screen.getByRole("navigation", { name: "Main" })
+  await userEvent.click(within(nav).getByRole("button", { name: "New chat" }))
+}
+
+async function openOverview() {
+  await userEvent.click(await screen.findByRole("button", { name: "Overview" }))
+}
+
+test("New Page creates a Page and opens it", async () => {
+  renderWorkspace(projectBackend())
+  await screen.findByText("Saved answer")
+
+  await userEvent.click(screen.getByRole("button", { name: "New Page" }))
+
+  expect(await screen.findByLabelText("Page title")).toHaveProperty(
+    "value",
+    "Untitled page"
+  )
+  expect(screen.getByText("Nothing on this Page yet")).toBeTruthy()
+})
+
+test("a Page runs its blocks, and one failure stays in its block", async () => {
+  renderWorkspace(pageBackend())
+
+  await openOverview()
+
+  expect(await screen.findByText("That query failed.")).toBeTruthy()
+  expect(await screen.findByRole("cell", { name: "1500" })).toBeTruthy()
+  expect(screen.getByRole("heading", { name: "Totals" })).toBeTruthy()
+})
+
+test("a filtered chart keeps showing with a single bar", async () => {
+  const chart = {
+    ...BLANK_BLOCK,
+    id: "b1",
+    kind: "figure",
+    title: "By region",
+    sql: "SELECT 1",
+    view: "bar",
+    xColumn: "region",
+    yColumn: "total",
+  }
+  renderWorkspace(pageBackend({ pages: [{ ...OVERVIEW, blocks: [chart] }] }))
+
+  await openOverview()
+
+  expect(await screen.findByRole("img", { name: "By region" })).toBeTruthy()
+})
+
+test("a block says so when a filter leaves it nothing to show", async () => {
+  const empty = {
+    ...BLANK_BLOCK,
+    id: "b1",
+    kind: "figure",
+    title: "By region",
+    sql: "EMPTY",
+    view: "bar",
+  }
+  renderWorkspace(pageBackend({ pages: [{ ...OVERVIEW, blocks: [empty] }] }))
+
+  await openOverview()
+
+  expect(await screen.findByText("Nothing matches this filter.")).toBeTruthy()
+})
+
+test("renaming a Page saves on leaving the title", async () => {
+  renderWorkspace(pageBackend())
+  await openOverview()
+
+  const title = await screen.findByLabelText("Page title")
+  await userEvent.clear(title)
+  await userEvent.type(title, "Q3 review{Enter}")
+
+  expect(await screen.findByRole("button", { name: "Q3 review" })).toBeTruthy()
+})
+
+test("choosing a filter value runs the Page again with it", async () => {
+  const onRunPage = vi.fn()
+  renderWorkspace(pageBackend({ onRunPage }))
+  await openOverview()
+  await screen.findByText("That query failed.")
+
+  await userEvent.click(screen.getByRole("button", { name: "Filter region" }))
+  await userEvent.click(
+    await screen.findByRole("menuitemcheckbox", { name: "EMEA" })
+  )
+
+  await waitFor(() => expect(onRunPage).toHaveBeenCalledTimes(2))
+  expect(onRunPage.mock.lastCall?.[0]).toMatchObject({
+    blocks: expect.arrayContaining([
+      expect.objectContaining({ id: "b3", values: ["EMEA"] }),
+    ]),
+  })
+  expect(
+    await screen.findByText("Filtering sales.csv, orders.csv")
+  ).toBeTruthy()
+})
+
+test("an answer can be pinned to a Page", async () => {
+  renderWorkspace(
+    pageBackend({
+      ask: () => SALES_ANSWER,
+      saved: [],
+      project: {
+        ...structuredClone(SAVED_PROJECT),
+        chats: [],
+        pages: [{ id: "page-1", title: "Overview", updatedAt: 1 }],
+      },
+      pages: [{ ...OVERVIEW, blocks: [] }],
+    })
+  )
+  await screen.findByText("EMEA")
+
+  await askQuestion("Sales?")
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Add to a Page" })
+  )
+  await userEvent.click(
+    await screen.findByRole("menuitem", { name: "Overview" })
+  )
+
+  expect(
+    await screen.findByRole("heading", { name: "Totals", level: 2 })
+  ).toBeTruthy()
+  expect(await screen.findByLabelText("Page title")).toHaveProperty(
+    "value",
+    "Overview"
+  )
+})
+
+test("the chat beside a Page tells the AI which Page is open", async () => {
+  const ask = vi.fn<(args: unknown) => unknown>(() => SALES_ANSWER)
+  renderWorkspace(pageBackend({ ask }))
+  await openOverview()
+  await screen.findByLabelText("Page title")
+  await startNewChat()
+
+  await askQuestion("Add a chart")
+
+  await waitFor(() => expect(ask).toHaveBeenCalled())
+  expect(ask.mock.calls[0][0]).toMatchObject({
+    request: { activePage: "page-1" },
+  })
+})
+
+test("a change from the AI shows on the Page straight away", async () => {
+  const onRunPage = vi.fn()
+  renderWorkspace(
+    pageBackend({
+      onRunPage,
+      ask: (args) => {
+        emit(args, {
+          id: "page-1",
+          kind: "page",
+          status: "done",
+          label: "Sales",
+        })
+        return new Promise(() => {})
+      },
+    })
+  )
+  await openOverview()
+  await screen.findByText("That query failed.")
+  await startNewChat()
+
+  await askQuestion("Add a chart")
+
+  await waitFor(() => expect(onRunPage).toHaveBeenCalledTimes(2))
+})
+
+test("a Page can't be edited while the AI works on it", async () => {
+  renderWorkspace(pageBackend({ ask: () => new Promise(() => {}) }))
+  await openOverview()
+  await screen.findByText("That query failed.")
+  await startNewChat()
+
+  await askQuestion("Add a chart")
+
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Remove Totals" })).toBeNull()
+  )
+  expect(screen.getByLabelText("Page title")).toHaveProperty("readOnly", true)
+})
+
+test("deleting a Page asks first and leaves the data", async () => {
+  renderWorkspace(pageBackend())
+  await openOverview()
+  await screen.findByLabelText("Page title")
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Delete Overview" })
+  )
+  expect(screen.getByText("Delete this Page?")).toBeTruthy()
+  await userEvent.click(screen.getByRole("button", { name: "Delete Page" }))
+
+  expect(await screen.findByText("No Page open")).toBeTruthy()
+})
+
 test("New chat starts over", async () => {
   await renderOpenTable(() => SALES_ANSWER)
   await askQuestion("Sales?")
@@ -1400,7 +1769,7 @@ test("the chat survives a visit to another section", async () => {
   await askQuestion("Sales?")
   await screen.findByRole("heading", { name: "Sales by region" })
 
-  await userEvent.click(screen.getByRole("button", { name: "Pages" }))
+  await userEvent.click(screen.getByRole("button", { name: "Settings" }))
   await userEvent.click(
     await screen.findByRole("button", { name: "sales.csv" })
   )
@@ -1522,9 +1891,6 @@ test("a read failure can be retried", async () => {
 
 test("the sidebar opens each section", async () => {
   renderWorkspace()
-
-  await userEvent.click(screen.getByRole("button", { name: "Pages" }))
-  expect(screen.getByText("No pages yet")).toBeTruthy()
 
   await userEvent.click(screen.getByRole("button", { name: "Settings" }))
   expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy()

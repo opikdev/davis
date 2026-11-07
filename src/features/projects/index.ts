@@ -4,6 +4,7 @@ export {
   dataFilesIn,
   removeProjectFile,
   type ChatSummary,
+  type PageSummary,
   type Project,
   type ProjectFile,
 } from "@/features/projects/api"

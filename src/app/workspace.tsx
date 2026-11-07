@@ -11,6 +11,7 @@ import { AppSidebar, VIEW_LABELS, type View } from "@/app/app-sidebar"
 import { Button } from "@/components/ui/button"
 import {
   Empty,
+  EmptyContent,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
@@ -35,7 +36,13 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { ModelPicker } from "@/features/ai-setup"
-import { ChatPanel, deleteChat, useChat } from "@/features/chat"
+import {
+  ChatPanel,
+  deleteChat,
+  useChat,
+  type Figure,
+  type StoredQuery,
+} from "@/features/chat"
 import {
   chooseFiles,
   DataView,
@@ -45,6 +52,7 @@ import {
   type OpenedTable,
 } from "@/features/data"
 import { Home, useFileDrop } from "@/features/home"
+import { PageView, PinMenu, usePage } from "@/features/pages"
 import {
   addProjectFile,
   checkDataFile,
@@ -53,6 +61,7 @@ import {
   removeProjectFile,
   useProject,
   type ChatSummary,
+  type PageSummary,
   type Project,
   type ProjectFile,
 } from "@/features/projects"
@@ -65,14 +74,17 @@ const CHAT_MIN_WIDTH = "16rem"
 function PanelHeader({
   view,
   table,
+  pageTitle,
   action,
 }: {
   view: View
   table?: OpenedTable
+  pageTitle?: string
   action: ReactNode
 }) {
   const { state } = useSidebar()
   const showsTable = view === "data" && table
+  const detail = showsTable ? table.name : view === "page" && pageTitle
 
   return (
     <header
@@ -83,15 +95,13 @@ function PanelHeader({
       )}
     >
       <SidebarTrigger aria-label="Toggle sidebar" />
-      <span
-        className={showsTable ? "text-muted-foreground" : "text-foreground"}
-      >
+      <span className={detail ? "text-muted-foreground" : "text-foreground"}>
         {VIEW_LABELS[view]}
       </span>
-      {showsTable && (
+      {detail && (
         <>
           <span className="text-subtle">/</span>
-          <span className="truncate text-foreground">{table.name}</span>
+          <span className="truncate text-foreground">{detail}</span>
         </>
       )}
       {action}
@@ -103,10 +113,12 @@ function EmptyView({
   icon,
   title,
   description,
+  action,
 }: {
   icon: IconSvgElement
   title: string
   description: string
+  action?: ReactNode
 }) {
   return (
     <Empty className="border-0">
@@ -119,6 +131,7 @@ function EmptyView({
         </EmptyTitle>
         <EmptyDescription>{description}</EmptyDescription>
       </EmptyHeader>
+      {action && <EmptyContent>{action}</EmptyContent>}
     </Empty>
   )
 }
@@ -143,6 +156,10 @@ function SettingsView() {
 type CurrentViewProps = {
   view: View
   files: ReturnType<typeof useOpenTable>
+  project?: string
+  pages: ReturnType<typeof usePage>
+  isAsking: boolean
+  onNewPage: () => void
   projectName?: string
   error?: string
   isDragging: boolean
@@ -152,6 +169,10 @@ type CurrentViewProps = {
 function CurrentView({
   view,
   files,
+  project,
+  pages,
+  isAsking,
+  onNewPage,
   projectName,
   error,
   isDragging,
@@ -176,12 +197,15 @@ function CurrentView({
           description="Files and connections you add will appear here."
         />
       )
-    case "pages":
-      return (
+    case "page":
+      return project && pages.page ? (
+        <PageView project={project} pages={pages} isLocked={isAsking} />
+      ) : (
         <EmptyView
           icon={DashboardSquare01Icon}
-          title="No pages yet"
-          description="Dashboards you build will appear here."
+          title="No Page open"
+          description="Pages are dashboards you build from your answers."
+          action={project && <Button onClick={onNewPage}>New Page</Button>}
         />
       )
     case "settings":
@@ -230,12 +254,32 @@ export function Workspace() {
     (path: string) => void refresh(path),
     [refresh]
   )
-  const chat = useChat(project?.path, files.table, onChatSaved)
+  const pages = usePage(project?.path, onChatSaved)
+  const {
+    reload: reloadPage,
+    close: closePage,
+    open: openPageById,
+    create: createPage,
+    addTo: addToPage,
+  } = pages
+  const reloadRef = useRef(reloadPage)
+  useEffect(() => {
+    reloadRef.current = reloadPage
+  }, [reloadPage])
+  const onPageChanged = useCallback(() => void reloadRef.current(), [])
+  const chat = useChat(
+    project?.path,
+    files.table,
+    onChatSaved,
+    view === "page" ? pages.page?.id : undefined,
+    onPageChanged
+  )
   const chatPanel = useRef<PanelImperativeHandle>(null)
   const chatContent = useRef<HTMLDivElement>(null)
   const chatWidth = useRef(CHAT_WIDTH)
   const showsTable = view === "data" && Boolean(files.table)
-  const showsChat = showsTable && isChatOpen
+  const showsPage = view === "page" && Boolean(pages.page)
+  const showsChat = (showsTable || showsPage) && isChatOpen
   const [keepsChat, setKeepsChat] = useState(false)
   if (showsChat && !keepsChat) setKeepsChat(true)
 
@@ -250,6 +294,28 @@ export function Workspace() {
     if (asPercentage) chatWidth.current = `${asPercentage}%`
     panel.resize(0)
   }, [showsChat])
+
+  const pageList = project?.pages
+  const figureAction = useCallback(
+    (figure: Figure, query: StoredQuery) => {
+      async function pin(pageId: string | undefined) {
+        setView("page")
+        if (pageId) await openPageById(pageId)
+        else await createPage()
+        await addToPage(pageId, {
+          kind: "figure",
+          title: figure.title,
+          sql: query.pageSql ?? query.sql,
+          view: figure.view,
+          xColumn: figure.x,
+          yColumn: figure.y,
+          ...(figure.view === "number" ? { w: 3, h: 4 } : { w: 6, h: 8 }),
+        })
+      }
+      return <PinMenu pages={pageList ?? []} onPin={(id) => void pin(id)} />
+    },
+    [addToPage, createPage, openPageById, pageList]
+  )
 
   const { clear: clearChat, open: restoreChat } = chat
   const { close: closeTable, open: openPath } = files
@@ -275,10 +341,11 @@ export function Workspace() {
       setProjectError(undefined)
       clearChat()
       closeTable()
+      closePage()
       setView("home")
       await restoreProject(entered)
     },
-    [clearChat, closeTable, restoreProject]
+    [clearChat, closePage, closeTable, restoreProject]
   )
 
   const hasStarted = useRef(false)
@@ -355,10 +422,21 @@ export function Workspace() {
     }
   }
 
+  async function newPage() {
+    const created = await pages.create()
+    if (created) setView("page")
+    return created
+  }
+
+  async function openPage(summary: PageSummary) {
+    setView("page")
+    await pages.open(summary.id)
+  }
+
   function startChat() {
     chat.clear()
     setIsChatOpen(true)
-    if (files.table) setView("data")
+    if (files.table && view !== "page") setView("data")
   }
 
   async function openChat(summary: ChatSummary) {
@@ -392,6 +470,10 @@ export function Workspace() {
         view={view}
         activeFile={files.table?.name}
         activeChat={chat.chatId}
+        activePage={pages.page?.id}
+        onNewPage={() => void newPage()}
+        onOpenPage={(summary) => void openPage(summary)}
+        onDeletePage={(summary) => void pages.remove(summary.id)}
         onViewChange={setView}
         onAddFiles={() => void browse()}
         onOpenFile={openFile}
@@ -418,8 +500,9 @@ export function Workspace() {
               <PanelHeader
                 view={view}
                 table={files.table}
+                pageTitle={pages.page?.title}
                 action={
-                  showsTable && (
+                  (showsTable || showsPage) && (
                     <ChatToggle
                       isOpen={isChatOpen}
                       onToggle={() => setIsChatOpen(!isChatOpen)}
@@ -431,6 +514,10 @@ export function Workspace() {
                 <CurrentView
                   view={view}
                   files={files}
+                  project={project?.path}
+                  pages={pages}
+                  isAsking={chat.isAsking}
+                  onNewPage={() => void newPage()}
                   projectName={project?.name}
                   error={projectError}
                   isDragging={isDragging}
@@ -495,8 +582,14 @@ export function Workspace() {
                 !showsChat && "opacity-0"
               )}
             >
-              {keepsChat && files.table && (
-                <ChatPanel table={files.table} profile={profile} chat={chat} />
+              {keepsChat && (files.table || showsPage) && (
+                <ChatPanel
+                  table={files.table}
+                  pageTitle={showsPage ? pages.page?.title : undefined}
+                  profile={profile}
+                  chat={chat}
+                  figureAction={figureAction}
+                />
               )}
             </div>
           </ResizablePanel>

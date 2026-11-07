@@ -3,6 +3,7 @@ import {
   ArrowRight01Icon,
   ChartBarLineIcon,
   CodeIcon,
+  DashboardSquare01Icon,
   HelpCircleIcon,
   Note01Icon,
   PlayIcon,
@@ -32,6 +33,7 @@ const KIND_ICONS: Record<AskStep["kind"], IconSvgElement> = {
   write: CodeIcon,
   run: PlayIcon,
   chart: ChartBarLineIcon,
+  page: DashboardSquare01Icon,
 }
 
 function duration(from: number, to: number) {

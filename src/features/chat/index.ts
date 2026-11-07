@@ -1,3 +1,7 @@
 export { ChatPanel } from "@/features/chat/chat-panel"
 export { useChat } from "@/features/chat/use-chat"
 export { deleteChat } from "@/features/chat/api"
+export { AnswerChart } from "@/features/chat/answer-chart"
+export { ResultTable } from "@/features/chat/answer-view"
+export { formatValue } from "@/features/chat/references"
+export type { Figure, QueryResult, StoredQuery } from "@/features/chat/api"

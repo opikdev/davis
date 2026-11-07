@@ -52,10 +52,7 @@ pub(crate) fn answer_once(
             })
             .collect(),
     };
-    let query_table = [QueryTable {
-        name: ONE_SHOT_TABLE.to_owned(),
-        source: table.opened.source.clone(),
-    }];
+    let query_table = [QueryTable::new(ONE_SHOT_TABLE, table.opened.source.clone())];
 
     let mut plan = plan_with_steps(&ask, None, settings_path, stop, 1, send)?;
     let Some(sql) = plan.sql.clone() else {
@@ -71,10 +68,16 @@ pub(crate) fn answer_once(
         }
         outcome => (sql.clone(), outcome?),
     };
-    Ok(answer_from(plan, sql, result, send))
+    Ok(answer_from(plan, sql, result, &table.name, send))
 }
 
-fn answer_from(plan: QueryPlan, sql: String, result: QueryResult, send: SendStep) -> AgentAnswer {
+fn answer_from(
+    plan: QueryPlan,
+    sql: String,
+    result: QueryResult,
+    table: &str,
+    send: SendStep,
+) -> AgentAnswer {
     const QUERY_ID: &str = "q1";
     let (view, x, y) = match &plan.chart {
         Some(chart) => {
@@ -106,7 +109,16 @@ fn answer_from(plan: QueryPlan, sql: String, result: QueryResult, send: SendStep
             x,
             y,
         }],
-        queries: BTreeMap::from([(QUERY_ID.to_owned(), StoredQuery { sql, result })]),
+        queries: BTreeMap::from([(
+            QUERY_ID.to_owned(),
+            StoredQuery {
+                page_sql: Some(format!(
+                    "WITH {ONE_SHOT_TABLE} AS (SELECT * FROM \"{table}\") {sql}"
+                )),
+                sql,
+                result,
+            },
+        )]),
         title: plan.title,
         text: String::new(),
         follow_ups: Vec::new(),

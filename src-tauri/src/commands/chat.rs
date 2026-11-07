@@ -71,6 +71,7 @@ pub async fn ask_project(
         Ok::<_, AppError>(davis_agent::answer_question(
             &tables,
             &request,
+            Path::new(&project),
             &settings,
             &run.stop,
             &run.questions,

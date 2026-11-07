@@ -1,10 +1,12 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use davis_ai::{ToolDefinition, ToolReply, Toolbox};
 use davis_core::{QueryResult, QueryTable, Row, run_query};
+use davis_project::{Block, BlockKind, Page, free_spot};
 use serde_json::{Value, json};
 
 use crate::answer::{Figure, FigureView, StoredQuery};
@@ -15,16 +17,45 @@ use crate::steps::{AskStep, SendStep, StepKind, StepStatus};
 pub(crate) const MAX_QUERIES: usize = 10;
 const MAX_ROWS_SENT: usize = 50;
 const MAX_CELL_CHARACTERS: usize = 200;
+const CHART_SIZE: (u32, u32) = (6, 8);
+const NUMBER_SIZE: (u32, u32) = (3, 4);
+const TEXT_SIZE: (u32, u32) = (6, 3);
+
+fn block_size(view: &str) -> Option<(u32, u32)> {
+    match view {
+        "bar" | "line" | "table" => Some(CHART_SIZE),
+        "number" => Some(NUMBER_SIZE),
+        _ => None,
+    }
+}
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis() as u64)
+}
+
+fn unique_block_id(page: &Page, base: &str) -> String {
+    let number = page.blocks.len();
+    format!("{base}-{number}")
+}
 
 #[derive(Default)]
 pub(crate) struct Findings {
     pub(crate) queries: BTreeMap<String, StoredQuery>,
     pub(crate) figures: Vec<Figure>,
     questions_asked: usize,
+    page_changes: usize,
+}
+
+pub(crate) struct OpenPage {
+    pub(crate) project: PathBuf,
+    pub(crate) id: String,
 }
 
 pub(crate) struct DataTools<'a> {
     pub(crate) tables: Vec<QueryTable>,
+    pub(crate) page: Option<OpenPage>,
     pub(crate) stop: Arc<AtomicBool>,
     pub(crate) questions: &'a QuestionBox,
     pub(crate) send: SendStep<'a>,
@@ -127,6 +158,7 @@ impl DataTools<'_> {
                     id,
                     StoredQuery {
                         sql: sql.to_owned(),
+                        page_sql: None,
                         result,
                     },
                 );
@@ -194,6 +226,137 @@ impl DataTools<'_> {
         }
     }
 
+    fn change_page(
+        &self,
+        label: &str,
+        detail: &str,
+        change: impl FnOnce(&mut Page) -> Result<(), String>,
+    ) -> ToolReply {
+        let Some(page) = &self.page else {
+            return failed("No Page is open.");
+        };
+        let mut problem = None;
+        let changed = davis_project::change_page(&page.project, &page.id, now_ms(), |page| {
+            problem = change(page).err();
+        });
+        if let Some(problem) = problem {
+            return failed(problem);
+        }
+        if changed.is_err() {
+            return failed("That Page could not be saved.");
+        }
+        let number = {
+            let mut findings = self.findings();
+            findings.page_changes += 1;
+            findings.page_changes
+        };
+        let mut step = AskStep::new(
+            format!("page-{number}"),
+            StepKind::Page,
+            StepStatus::Done,
+            label,
+        );
+        step.detail = Some(detail.to_owned());
+        (self.send)(&step);
+        ToolReply {
+            text: "Done.".to_owned(),
+            is_error: false,
+        }
+    }
+
+    fn add_to_page(&self, input: &Value) -> ToolReply {
+        let id = input["query_id"].as_str().unwrap_or_default();
+        let title = input["title"].as_str().unwrap_or_default();
+        let view = input["view"].as_str().unwrap_or_default();
+        if title.is_empty() {
+            return failed("Give the block a short title.");
+        }
+        let Some(size) = block_size(view) else {
+            return failed("Choose a view: bar, line, number or table.");
+        };
+        let text_of = |name: &str| input[name].as_str().map(str::to_owned);
+        let (x_column, y_column) = (text_of("x"), text_of("y"));
+        let sql = {
+            let findings = self.findings();
+            let Some(query) = findings.queries.get(id) else {
+                return failed(format!("There is no query {id}."));
+            };
+            let has_column = |name: &Option<String>| {
+                name.as_ref()
+                    .is_some_and(|name| query.result.columns.iter().any(|c| c.name == *name))
+            };
+            if matches!(view, "bar" | "line") && !(has_column(&x_column) && has_column(&y_column)) {
+                return failed("A chart needs x and y set to columns of that query.");
+            }
+            query.page_sql.clone().unwrap_or_else(|| query.sql.clone())
+        };
+        let new_id = format!("b{}", now_ms());
+        self.change_page(title, "added to the Page", |page| {
+            let (x, y) = free_spot(&page.blocks, size.0, size.1);
+            page.blocks.push(Block {
+                id: unique_block_id(page, &new_id),
+                kind: BlockKind::Figure,
+                x,
+                y,
+                w: size.0,
+                h: size.1,
+                title: title.to_owned(),
+                sql: Some(sql),
+                view: Some(view.to_owned()),
+                x_column,
+                y_column,
+                ..Block::default()
+            });
+            Ok(())
+        })
+    }
+
+    fn add_text_to_page(&self, input: &Value) -> ToolReply {
+        let text = input["text"].as_str().unwrap_or_default();
+        if text.trim().is_empty() {
+            return failed("Give the text to add.");
+        }
+        let new_id = format!("b{}", now_ms());
+        self.change_page("Note", "added to the Page", |page| {
+            let (x, y) = free_spot(&page.blocks, TEXT_SIZE.0, TEXT_SIZE.1);
+            page.blocks.push(Block {
+                id: unique_block_id(page, &new_id),
+                kind: BlockKind::Text,
+                x,
+                y,
+                w: TEXT_SIZE.0,
+                h: TEXT_SIZE.1,
+                text: Some(text.to_owned()),
+                ..Block::default()
+            });
+            Ok(())
+        })
+    }
+
+    fn remove_from_page(&self, input: &Value) -> ToolReply {
+        let id = input["block_id"].as_str().unwrap_or_default();
+        self.change_page("Removed a block", "from the Page", |page| {
+            let before = page.blocks.len();
+            page.blocks.retain(|block| block.id != id);
+            if page.blocks.len() == before {
+                Err(format!("There is no block {id}."))
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    fn rename_page(&self, input: &Value) -> ToolReply {
+        let title = input["title"].as_str().unwrap_or_default().trim();
+        if title.is_empty() {
+            return failed("Give the Page a title.");
+        }
+        self.change_page(title, "new Page title", |page| {
+            page.title = title.to_owned();
+            Ok(())
+        })
+    }
+
     fn ask_user(&self, input: &Value) -> ToolReply {
         let Some(question) = input["question"].as_str() else {
             return failed("Give the question to ask.");
@@ -237,9 +400,63 @@ impl DataTools<'_> {
     }
 }
 
+fn page_tools() -> Vec<ToolDefinition> {
+    vec![
+        ToolDefinition {
+            name: "add_to_page",
+            description: "Add a chart, number or table from a query you ran to the open Page. \
+                It stays linked to the query, so it updates with the data.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query_id": { "type": "string" },
+                    "title": { "type": "string", "description": "Short sentence case title" },
+                    "view": { "type": "string", "enum": ["bar", "line", "number", "table"] },
+                    "x": { "type": "string", "description": "Column for a chart's x axis" },
+                    "y": { "type": "string", "description": "Column for a chart's values" },
+                },
+                "required": ["query_id", "title", "view"],
+            }),
+        },
+        ToolDefinition {
+            name: "add_text_to_page",
+            description: "Add a short note to the open Page. Type no numbers from the data here, \
+                because a note won't update when the data does.",
+            input_schema: json!({
+                "type": "object",
+                "properties": { "text": { "type": "string" } },
+                "required": ["text"],
+            }),
+        },
+        ToolDefinition {
+            name: "remove_from_page",
+            description: "Remove a block from the open Page.",
+            input_schema: json!({
+                "type": "object",
+                "properties": { "block_id": { "type": "string" } },
+                "required": ["block_id"],
+            }),
+        },
+        ToolDefinition {
+            name: "rename_page",
+            description: "Change the title of the open Page.",
+            input_schema: json!({
+                "type": "object",
+                "properties": { "title": { "type": "string" } },
+                "required": ["title"],
+            }),
+        },
+    ]
+}
+
 impl Toolbox for DataTools<'_> {
     fn definitions(&self) -> Vec<ToolDefinition> {
-        vec![
+        let page_tools = if self.page.is_some() {
+            page_tools()
+        } else {
+            Vec::new()
+        };
+        let mut tools = vec![
             ToolDefinition {
                 name: "run_query",
                 description: "Run one read-only DuckDB SELECT over the listed tables. Returns a \
@@ -289,7 +506,9 @@ impl Toolbox for DataTools<'_> {
                     "required": ["question"],
                 }),
             },
-        ]
+        ];
+        tools.extend(page_tools);
+        tools
     }
 
     fn call(&self, name: &str, input: &Value) -> ToolReply {
@@ -298,6 +517,10 @@ impl Toolbox for DataTools<'_> {
             "run_query" => self.run_query(input),
             "show_result" => self.show_result(input),
             "ask_user" => self.ask_user(input),
+            "add_to_page" => self.add_to_page(input),
+            "add_text_to_page" => self.add_text_to_page(input),
+            "remove_from_page" => self.remove_from_page(input),
+            "rename_page" => self.rename_page(input),
             _ => failed(format!("There is no tool called {name}.")),
         }
     }
@@ -331,10 +554,7 @@ mod tests {
         fn table(&self, name: &str, content: &str) -> QueryTable {
             let path = self.0.join(format!("{name}.csv"));
             fs::write(&path, content).unwrap();
-            QueryTable {
-                name: name.to_owned(),
-                source: open_table(&path.to_string_lossy()).unwrap().source,
-            }
+            QueryTable::new(name, open_table(&path.to_string_lossy()).unwrap().source)
         }
     }
 
@@ -353,10 +573,22 @@ mod tests {
         stop: Arc<AtomicBool>,
         work: impl FnOnce(&DataTools) -> T,
     ) -> T {
+        with_page(tables, None, questions, steps, stop, work)
+    }
+
+    fn with_page<T>(
+        tables: Vec<QueryTable>,
+        page: Option<OpenPage>,
+        questions: &QuestionBox,
+        steps: &Steps,
+        stop: Arc<AtomicBool>,
+        work: impl FnOnce(&DataTools) -> T,
+    ) -> T {
         let send = |step: &AskStep| steps.lock().unwrap().push(step.clone());
         let narration = Narration::new(&send);
         let tools = DataTools {
             tables,
+            page,
             stop,
             questions,
             send: &send,
@@ -608,6 +840,170 @@ mod tests {
         );
     }
 
+    fn page_project(folder: &Folder) -> OpenPage {
+        let project = davis_project::create_project(&folder.0, "Sales").unwrap();
+        let project = PathBuf::from(project.path);
+        davis_project::save_page(
+            &project,
+            &Page {
+                id: "p1".to_owned(),
+                title: "Overview".to_owned(),
+                updated_at: 1,
+                blocks: Vec::new(),
+            },
+        )
+        .unwrap();
+        OpenPage {
+            project,
+            id: "p1".to_owned(),
+        }
+    }
+
+    #[test]
+    fn page_tools_exist_only_when_a_page_is_open() {
+        let steps = Steps::default();
+        let box_ = QuestionBox::default();
+
+        let names = with_tools(Vec::new(), &box_, &steps, Arc::default(), |tools| {
+            tools
+                .definitions()
+                .iter()
+                .map(|tool| tool.name)
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(names, ["run_query", "show_result", "ask_user"]);
+
+        with_tools(Vec::new(), &box_, &steps, Arc::default(), |tools| {
+            let reply = tools.call("add_text_to_page", &json!({ "text": "Hello" }));
+            assert!(reply.is_error);
+        });
+    }
+
+    #[test]
+    fn the_ai_can_add_a_query_to_the_open_page() {
+        let folder = Folder::new();
+        let page = page_project(&folder);
+        let project = page.project.clone();
+        let steps = Steps::default();
+        let box_ = QuestionBox::default();
+
+        with_page(
+            vec![folder.table("sales", SALES)],
+            Some(page),
+            &box_,
+            &steps,
+            Arc::default(),
+            |tools| {
+                query(tools, "SELECT region, amount FROM sales");
+                let add = |view: &str| {
+                    tools.call(
+                        "add_to_page",
+                        &json!({
+                            "query_id": "q1", "title": "Sales", "view": view,
+                            "x": "region", "y": "amount",
+                        }),
+                    )
+                };
+
+                assert!(!add("bar").is_error);
+                assert!(!add("line").is_error);
+                assert!(add("pie").is_error);
+            },
+        );
+
+        let saved = davis_project::read_page(&project, "p1").unwrap();
+        assert_eq!(saved.blocks.len(), 2);
+        assert_ne!(saved.blocks[0].id, saved.blocks[1].id);
+        assert_eq!(
+            saved.blocks[0].sql.as_deref(),
+            Some("SELECT region, amount FROM sales")
+        );
+        assert_eq!((saved.blocks[1].x, saved.blocks[1].y), (6, 0));
+        assert_eq!(steps.lock().unwrap().last().unwrap().kind, StepKind::Page);
+    }
+
+    #[test]
+    fn a_page_block_must_use_a_real_query_and_real_columns() {
+        let folder = Folder::new();
+        let page = page_project(&folder);
+        let project = page.project.clone();
+        let steps = Steps::default();
+        let box_ = QuestionBox::default();
+
+        with_page(
+            vec![folder.table("sales", SALES)],
+            Some(page),
+            &box_,
+            &steps,
+            Arc::default(),
+            |tools| {
+                query(tools, "SELECT region FROM sales");
+                let add = |input: Value| tools.call("add_to_page", &input);
+
+                assert!(add(json!({ "query_id": "q9", "title": "T", "view": "table" })).is_error);
+                assert!(
+                    add(json!({
+                        "query_id": "q1", "title": "T", "view": "bar", "x": "region", "y": "nope",
+                    }))
+                    .is_error
+                );
+            },
+        );
+
+        assert!(
+            davis_project::read_page(&project, "p1")
+                .unwrap()
+                .blocks
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn the_ai_can_note_rename_and_remove() {
+        let folder = Folder::new();
+        let page = page_project(&folder);
+        let project = page.project.clone();
+        let steps = Steps::default();
+        let box_ = QuestionBox::default();
+
+        with_page(
+            Vec::new(),
+            Some(page),
+            &box_,
+            &steps,
+            Arc::default(),
+            |tools| {
+                assert!(
+                    !tools
+                        .call("add_text_to_page", &json!({ "text": "Read me" }))
+                        .is_error
+                );
+                assert!(
+                    !tools
+                        .call("rename_page", &json!({ "title": "Q3" }))
+                        .is_error
+                );
+                let id = davis_project::read_page(&project, "p1").unwrap().blocks[0]
+                    .id
+                    .clone();
+                assert!(
+                    tools
+                        .call("remove_from_page", &json!({ "block_id": "nope" }))
+                        .is_error
+                );
+                assert!(
+                    !tools
+                        .call("remove_from_page", &json!({ "block_id": id }))
+                        .is_error
+                );
+            },
+        );
+
+        let saved = davis_project::read_page(&project, "p1").unwrap();
+        assert_eq!(saved.title, "Q3");
+        assert!(saved.blocks.is_empty());
+    }
+
     #[test]
     fn notes_end_when_a_tool_starts_and_the_last_text_stays_open() {
         let folder = Folder::new();
@@ -619,6 +1015,7 @@ mod tests {
         let narration = Narration::new(&send);
         let tools = DataTools {
             tables: vec![table],
+            page: None,
             stop: Arc::default(),
             questions: &box_,
             send: &send,

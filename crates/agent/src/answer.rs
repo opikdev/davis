@@ -12,7 +12,7 @@ use crate::one_shot::answer_once;
 use crate::prompt::{INSTRUCTIONS, ProjectTable, build_prompt};
 use crate::questions::QuestionBox;
 use crate::steps::{AskStep, SendStep, StepKind, StepStatus};
-use crate::toolbox::{DataTools, Findings, MAX_QUERIES};
+use crate::toolbox::{DataTools, Findings, MAX_QUERIES, OpenPage};
 use crate::{AgentError, Result};
 
 const MAX_TITLE_CHARACTERS: usize = 80;
@@ -32,6 +32,8 @@ pub struct PastTurn {
 pub struct AgentRequest {
     pub question: String,
     pub active_table: Option<String>,
+    #[serde(default)]
+    pub active_page: Option<String>,
     pub history: Vec<PastTurn>,
 }
 
@@ -69,6 +71,7 @@ pub struct Figure {
 #[serde(rename_all = "camelCase")]
 pub struct StoredQuery {
     pub sql: String,
+    pub page_sql: Option<String>,
     pub result: QueryResult,
 }
 
@@ -135,6 +138,7 @@ fn read_tables_step(tables: &[ProjectTable]) -> AskStep {
 pub fn answer_question(
     tables: &[ProjectTable],
     request: &AgentRequest,
+    project: &Path,
     settings_path: &Path,
     stop: &Arc<AtomicBool>,
     questions: &QuestionBox,
@@ -145,6 +149,11 @@ pub fn answer_question(
         return answer_once(tables, request, settings_path, stop, send);
     }
 
+    let page = request
+        .active_page
+        .as_deref()
+        .map(|id| davis_project::read_page(project, id))
+        .transpose()?;
     let narration = Narration::new(send);
     let tools = DataTools {
         tables: tables.iter().map(ProjectTable::query_table).collect(),
@@ -153,8 +162,12 @@ pub fn answer_question(
         send,
         narration: &narration,
         findings: Mutex::default(),
+        page: page.as_ref().map(|page| OpenPage {
+            project: project.to_owned(),
+            id: page.id.clone(),
+        }),
     };
-    let prompt = build_prompt(tables, request);
+    let prompt = build_prompt(tables, request, page.as_ref());
     let reply = run_with_tools(
         &ToolRun {
             settings_path,
@@ -277,6 +290,7 @@ mod tests {
         let request = AgentRequest {
             question: "Why?".to_owned(),
             active_table: Some("sales.csv".to_owned()),
+            active_page: None,
             history: vec![PastTurn {
                 question: "Total?".to_owned(),
                 answer: "It was 10.".to_owned(),
@@ -284,7 +298,7 @@ mod tests {
             }],
         };
 
-        let prompt = build_prompt(&tables, &request);
+        let prompt = build_prompt(&tables, &request, None);
         std::fs::remove_dir_all(&folder).unwrap();
 
         assert!(prompt.contains("- sales [file sales.csv, 1 rows]: region (VARCHAR)"));

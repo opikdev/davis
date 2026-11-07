@@ -26,7 +26,7 @@ Dependencies point one way. The crates know nothing about Tauri or React, so the
 | `crates/core/`            | Queries, profiling, and data logic                                            | Depend on Tauri                          |
 | `crates/ai/`              | Providers, keys, settings, and talking to models with tools                   | Know about data or SQL                   |
 | `crates/agent/`           | The analyst: its tools, its prompt, and what the AI may see                   | Depend on Tauri                          |
-| `crates/project/`         | Project folders, saved chats, and turning workbooks into tables               | Depend on Tauri                          |
+| `crates/project/`         | Project folders, saved chats and Pages, and turning workbooks into tables     | Depend on Tauri                          |
 
 ## Why it is built this way
 
@@ -47,13 +47,19 @@ Davis opens files it did not create, and later runs SQL written by a model. Trea
 
 The AI must never read the user's files directly. It only gets what Davis hands it, and everything it sees of the data passes through `sent_to_model` in `crates/agent/src/toolbox.rs`: at most 50 rows of each query, with long cells shortened. Each answer shows what it saw.
 
-- **Tools:** the model gets `run_query`, `show_result`, and `ask_user`, and nothing else. Claude Code reaches them over an HTTP server on `127.0.0.1` that lives for one run behind a random token (`crates/ai/src/bridge.rs`), with its built-in tools off.
+- **Tools:** the model gets `run_query`, `show_result`, and `ask_user`, plus tools to change the open Page, and nothing else. Claude Code reaches them over an HTTP server on `127.0.0.1` that lives for one run behind a random token (`crates/ai/src/bridge.rs`), with its built-in tools off.
 - **Queries:** `crates/core/src/query.rs` allows one read-only `SELECT` over the project's files. The `require_one_select` check is what protects them: DuckDB's lockdown alone still lets `COPY` overwrite an allowed file.
 - **Errors:** only problems with the query itself go back to the model, because other errors can quote file contents.
 - **File contents:** cell values and column names are data, never instructions. A CLI with only Davis's tools has no way to act on an instruction hidden in a file.
 - **Numbers:** answers reference query results, and Davis fills in the values, so the model can't invent a number the user sees as fact.
 
 A CLI's sandbox is not enough on its own. Codex's `read-only` sandbox only blocks writes, so with a shell it can read any file. Codex and OpenCode therefore run with their tools off and answer one query at a time.
+
+## Pages
+
+A Page block stores its query, not its numbers, so opening a Page always shows the current data.
+
+Filters narrow the tables themselves, not a block's result, because filtering an aggregate afterwards gives wrong numbers. A filter also follows links found by `find_links`, so a filter on `customers` reaches a total worked out from `orders` alone. Each filter shows which files it reached, because a block that a filter can't reach keeps showing unfiltered numbers.
 
 ## AI setup
 

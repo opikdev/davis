@@ -14,11 +14,18 @@ export type ChatSummary = {
   updatedAt: number
 }
 
+export type PageSummary = {
+  id: string
+  title: string
+  updatedAt: number
+}
+
 export type Project = {
   path: string
   name: string
   files: ProjectFile[]
   chats: ChatSummary[]
+  pages: PageSummary[]
 }
 
 export type RecentProject = {

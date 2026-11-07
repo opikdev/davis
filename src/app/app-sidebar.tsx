@@ -30,25 +30,27 @@ import {
   ConfirmRemoval,
   ProjectSwitcher,
   type ChatSummary,
+  type PageSummary,
   type ProjectFile,
 } from "@/features/projects"
 
-export type View = "home" | "data" | "pages" | "settings"
+export type View = "home" | "data" | "page" | "settings"
 
 export const VIEW_LABELS: Record<View, string> = {
   home: "Home",
   data: "Data",
-  pages: "Pages",
+  page: "Pages",
   settings: "Settings",
 }
 
 const MAIN_ITEMS: { view: View; icon: IconSvgElement }[] = [
   { view: "home", icon: Home01Icon },
-  { view: "pages", icon: DashboardSquare01Icon },
 ]
 
 type Removal =
-  { kind: "file"; file: ProjectFile } | { kind: "chat"; chat: ChatSummary }
+  | { kind: "file"; file: ProjectFile }
+  | { kind: "chat"; chat: ChatSummary }
+  | { kind: "page"; page: PageSummary }
 
 type AppSidebarProps = Pick<
   React.ComponentProps<typeof ProjectSwitcher>,
@@ -57,6 +59,10 @@ type AppSidebarProps = Pick<
   view: View
   activeFile?: string
   activeChat?: string
+  activePage?: string
+  onNewPage: () => void
+  onOpenPage: (page: PageSummary) => void
+  onDeletePage: (page: PageSummary) => void
   onViewChange: (view: View) => void
   onAddFiles: () => void
   onOpenFile: (file: ProjectFile) => void
@@ -76,6 +82,10 @@ export function AppSidebar({
   view,
   activeFile,
   activeChat,
+  activePage,
+  onNewPage,
+  onOpenPage,
+  onDeletePage,
   onViewChange,
   onAddFiles,
   onOpenFile,
@@ -132,6 +142,42 @@ export function AppSidebar({
         </SidebarGroup>
         {project && (
           <>
+            <SidebarGroup>
+              <SidebarGroupLabel>Pages</SidebarGroupLabel>
+              <SidebarGroupAction
+                aria-label="New Page"
+                disabled={isBusy}
+                onClick={onNewPage}
+              >
+                <HugeiconsIcon icon={Add01Icon} strokeWidth={1.5} />
+              </SidebarGroupAction>
+              <SidebarMenu className="gap-0">
+                {project.pages.map((page) => (
+                  <SidebarMenuItem key={page.id}>
+                    <SidebarMenuButton
+                      title={page.title}
+                      disabled={isBusy}
+                      isActive={view === "page" && page.id === activePage}
+                      onClick={() => onOpenPage(page)}
+                    >
+                      <HugeiconsIcon
+                        icon={DashboardSquare01Icon}
+                        strokeWidth={1.5}
+                      />
+                      <span className="truncate">{page.title}</span>
+                    </SidebarMenuButton>
+                    <SidebarMenuAction
+                      showOnHover
+                      aria-label={`Delete ${page.title}`}
+                      disabled={isBusy}
+                      onClick={() => setRemoval({ kind: "page", page })}
+                    >
+                      <HugeiconsIcon icon={Cancel01Icon} strokeWidth={1.5} />
+                    </SidebarMenuAction>
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroup>
             <SidebarGroup>
               <SidebarGroupLabel>Data</SidebarGroupLabel>
               <SidebarGroupAction aria-label="Add files" onClick={onAddFiles}>
@@ -223,6 +269,15 @@ export function AppSidebar({
           description="Davis deletes its copy from this project. Your original file isn't touched, but charts and answers built on this file may stop working."
           action="Remove file"
           onConfirm={() => onRemoveFile(removal.file)}
+          onClose={() => setRemoval(undefined)}
+        />
+      )}
+      {removal?.kind === "page" && (
+        <ConfirmRemoval
+          title="Delete this Page?"
+          description={`${removal.page.title} will be deleted for good. The data and chats it came from stay in the project.`}
+          action="Delete Page"
+          onConfirm={() => onDeletePage(removal.page)}
           onClose={() => setRemoval(undefined)}
         />
       )}

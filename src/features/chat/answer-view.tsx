@@ -1,3 +1,5 @@
+import type { ReactNode } from "react"
+
 import {
   Table,
   TableBody,
@@ -8,7 +10,12 @@ import {
 } from "@/components/ui/table"
 import { AnswerChart } from "@/features/chat/answer-chart"
 import { AnswerText } from "@/features/chat/answer-text"
-import type { AgentAnswer, Figure, QueryResult } from "@/features/chat/api"
+import type {
+  AgentAnswer,
+  Figure,
+  QueryResult,
+  StoredQuery,
+} from "@/features/chat/api"
 import { formatValue } from "@/features/chat/references"
 import { cn } from "@/lib/utils"
 
@@ -72,19 +79,31 @@ export function ResultTable({
   )
 }
 
+export type FigureAction = (figure: Figure, query: StoredQuery) => ReactNode
+
 function FigureView({
   figure,
-  result,
+  query,
+  action,
 }: {
   figure: Figure
-  result: QueryResult
+  query: StoredQuery
+  action?: FigureAction
 }) {
+  const { result } = query
+  const heading = (
+    <div className="group/figure flex items-center justify-between gap-2">
+      <h3 className="truncate text-xs text-muted-foreground">{figure.title}</h3>
+      {action?.(figure, query)}
+    </div>
+  )
+
   if (figure.view === "number") {
     const column = result.columns.findIndex(({ name }) => name === figure.y)
     const value = result.rows[0]?.[Math.max(column, 0)]
     return (
       <div className="flex flex-col">
-        <h3 className="text-xs text-muted-foreground">{figure.title}</h3>
+        {heading}
         <p className="text-2xl font-medium tabular-nums select-text">
           {value ? formatValue(value) : "null"}
         </p>
@@ -94,7 +113,7 @@ function FigureView({
 
   return (
     <div className="flex flex-col gap-1.5">
-      <h3 className="text-xs text-muted-foreground">{figure.title}</h3>
+      {heading}
       {figure.view !== "table" && (
         <AnswerChart figure={figure} result={result} />
       )}
@@ -103,7 +122,12 @@ function FigureView({
   )
 }
 
-export function AnswerView({ answer }: { answer: AgentAnswer }) {
+type AnswerViewProps = {
+  answer: AgentAnswer
+  figureAction?: FigureAction
+}
+
+export function AnswerView({ answer, figureAction }: AnswerViewProps) {
   const { title, text, figures, queries } = answer
 
   return (
@@ -115,7 +139,12 @@ export function AnswerView({ answer }: { answer: AgentAnswer }) {
       {figures.map((figure, index) => {
         const query = queries[figure.query]
         return query ? (
-          <FigureView key={index} figure={figure} result={query.result} />
+          <FigureView
+            key={index}
+            figure={figure}
+            query={query}
+            action={figureAction}
+          />
         ) : null
       })}
     </div>

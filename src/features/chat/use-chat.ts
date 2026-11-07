@@ -114,13 +114,16 @@ function useStepBuffer(onFlush: (id: number, steps: AskStep[]) => void) {
 export function useChat(
   project: string | undefined,
   table: OpenedTable | undefined,
-  onSaved: (project: string) => void
+  onSaved: (project: string) => void,
+  activePage?: string,
+  onPageChanged?: () => void
 ) {
   const [turns, setTurns] = useState<Turn[]>([])
   const [chatId, setChatId] = useState<string>()
   const [saveError, setSaveError] = useState<string>()
   const savedTurns = useRef(turns)
   const latestTurns = useRef(turns)
+  const pageChanged = useRef(onPageChanged)
   const lastSave = useRef(0)
   const nextId = useRef(1)
   const activeId = turns.find((turn) => !turn.finishedAt)?.id
@@ -128,7 +131,8 @@ export function useChat(
 
   useEffect(() => {
     latestTurns.current = turns
-  }, [turns])
+    pageChanged.current = onPageChanged
+  }, [onPageChanged, turns])
 
   useEffect(() => {
     if (!project || !chatId) return
@@ -184,8 +188,16 @@ export function useChat(
         const answer = await askProject(
           id,
           project,
-          { question, activeTable: table?.name ?? null, history },
-          (step) => buffer.add(id, step)
+          {
+            question,
+            activeTable: table?.name ?? null,
+            activePage: activePage ?? null,
+            history,
+          },
+          (step) => {
+            buffer.add(id, step)
+            if (step.kind === "page") pageChanged.current?.()
+          }
         )
         buffer.flush()
         update(id, (turn) =>
@@ -211,7 +223,7 @@ export function useChat(
         }))
       }
     },
-    [buffer, project, table?.name, update]
+    [activePage, buffer, project, table?.name, update]
   )
 
   const ask = useCallback(

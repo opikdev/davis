@@ -10,6 +10,7 @@ export type QueryResult = {
 
 export type StoredQuery = {
   sql: string
+  pageSql?: string | null
   result: QueryResult
 }
 
@@ -37,7 +38,8 @@ export type PastTurn = {
 
 export type AskStep = {
   id: string
-  kind: "read" | "think" | "note" | "write" | "run" | "chart" | "question"
+  kind:
+    "read" | "think" | "note" | "write" | "run" | "chart" | "question" | "page"
   status: "running" | "done" | "failed" | "stopped"
   label: string
   detail: string | null
@@ -77,6 +79,7 @@ export function askProject(
   request: {
     question: string
     activeTable: string | null
+    activePage: string | null
     history: PastTurn[]
   },
   onStep: (step: AskStep) => void

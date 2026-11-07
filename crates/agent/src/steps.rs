@@ -10,6 +10,7 @@ pub enum StepKind {
     Run,
     Chart,
     Question,
+    Page,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

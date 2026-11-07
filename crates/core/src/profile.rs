@@ -8,6 +8,7 @@ use crate::{Error, Result};
 const TOP_VALUES: usize = 5;
 const HISTOGRAM_BINS: u32 = 12;
 const MIN_MATCH_PERCENT: f64 = 90.0;
+const MAX_OPTIONS: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -160,6 +161,20 @@ pub fn column_values(
             last = HISTOGRAM_BINS - 1
         ),
     )
+}
+
+pub fn column_options(source: &TableSource, column: &str) -> Result<Vec<String>> {
+    let connection = connect()?;
+    let name = identifier(column);
+    let mut statement = connection.prepare(&format!(
+        "SELECT DISTINCT {name}::VARCHAR AS value FROM {} WHERE {name} IS NOT NULL
+         ORDER BY value LIMIT {MAX_OPTIONS}",
+        scan(source, false)
+    ))?;
+    let options = statement
+        .query_map([], |row| row.get(0))?
+        .collect::<duckdb::Result<Vec<String>>>()?;
+    Ok(options)
 }
 
 fn normalized(name: &str) -> String {
@@ -324,10 +339,7 @@ mod tests {
         fn table(&self, name: &str, content: &str) -> QueryTable {
             let path = self.0.join(format!("{name}.csv"));
             fs::write(&path, content).unwrap();
-            QueryTable {
-                name: name.to_owned(),
-                source: open_table(&path.to_string_lossy()).unwrap().source,
-            }
+            QueryTable::new(name, open_table(&path.to_string_lossy()).unwrap().source)
         }
     }
 
@@ -413,6 +425,17 @@ mod tests {
         let values = column_values(&table.source, name, ColumnKind::Text).unwrap();
 
         assert_eq!(values.len(), 1);
+    }
+
+    #[test]
+    fn filter_options_are_each_value_once_in_order() {
+        let folder = Folder::new();
+        let table = folder.table("t", "city\nRome\nOslo\nRome\n\n");
+
+        assert_eq!(
+            column_options(&table.source, "city").unwrap(),
+            ["Oslo", "Rome"]
+        );
     }
 
     #[test]
