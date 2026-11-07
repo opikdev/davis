@@ -7,6 +7,6 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-duckdb = { version = "1.20000", features = ["bundled"] }
+duckdb = { version = "1.20000", features = ["bundled", "json", "parquet"] }
 serde.workspace = true
 thiserror.workspace = true

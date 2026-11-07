@@ -14,7 +14,7 @@ impl AppError {
     fn kind(&self) -> &'static str {
         match self {
             Self::Ai(error) => error.code(),
-            Self::Engine(_) => "engine",
+            Self::Engine(error) => error.code(),
             Self::Task(_) => "task",
         }
     }

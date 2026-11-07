@@ -1,0 +1,52 @@
+import { useCallback, useState } from "react"
+
+import { Badge } from "@/components/ui/badge"
+import type { OpenedTable } from "@/features/data/api"
+import { DataTable } from "@/features/data/data-table"
+
+function repairNote({ source, skippedRows }: OpenedTable) {
+  if (source.repair === "skip-bad-rows") {
+    const rows =
+      skippedRows === 1 ? "1 row" : `${skippedRows.toLocaleString()} rows`
+    const verb = skippedRows === 1 ? "was" : "were"
+    return `${rows} couldn't be read and ${verb} left out.`
+  }
+  if (source.repair === "fill-missing-values") {
+    return "Some rows had too few values, so the gaps are shown as null."
+  }
+  return undefined
+}
+
+export function DataView({ table }: { table: OpenedTable }) {
+  const [visible, setVisible] = useState({ first: 0, last: 0 })
+  const showVisibleRows = useCallback(
+    (first: number, last: number) => setVisible({ first, last }),
+    []
+  )
+  const note = repairNote(table)
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <h1 className="sr-only">{table.name}</h1>
+      <DataTable
+        key={table.source.path}
+        table={table}
+        onVisibleRowsChange={showVisibleRows}
+      />
+      <footer className="flex h-7 shrink-0 items-center gap-2.5 border-t pr-3 pl-2 text-xs text-subtle tabular-nums">
+        <Badge className="bg-primary/15 text-primary uppercase">
+          {table.source.format}
+        </Badge>
+        <span>
+          {table.rowCount.toLocaleString()} rows, {table.columns.length} columns
+        </span>
+        {note && <span role="status">{note}</span>}
+        {table.rowCount > 0 && (
+          <span className="ml-auto">
+            {visible.first.toLocaleString()} to {visible.last.toLocaleString()}
+          </span>
+        )}
+      </footer>
+    </div>
+  )
+}

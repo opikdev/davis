@@ -2,6 +2,7 @@ import { clearMocks, mockIPC } from "@tauri-apps/api/mocks"
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -19,6 +20,9 @@ type DropEvent = { payload: DragDropEvent }
 const drops = vi.hoisted(() => ({
   send: (() => {}) as (event: unknown) => void,
 }))
+const chooseFile = vi.hoisted(() => vi.fn())
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: chooseFile }))
 
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({
@@ -43,12 +47,15 @@ beforeEach(() => {
     }
   )
   Element.prototype.scrollIntoView = () => {}
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400)
 })
 
 afterEach(() => {
   cleanup()
   clearMocks()
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+  chooseFile.mockReset()
 })
 
 const CLAUDE_MODELS = [
@@ -74,6 +81,8 @@ type Backend = {
   models?: (providerId: string) => unknown
   chosen?: unknown
   onChoose?: (choice: unknown) => void
+  openTable?: () => unknown
+  rows?: (args: unknown) => unknown
 }
 
 function renderWorkspace({
@@ -82,6 +91,8 @@ function renderWorkspace({
     providerId === "codex" ? CODEX_MODELS : CLAUDE_MODELS,
   chosen = null,
   onChoose,
+  openTable,
+  rows,
 }: Backend = {}) {
   mockIPC((command, args) => {
     const payload = args as Record<string, unknown>
@@ -89,6 +100,8 @@ function renderWorkspace({
     if (command === "list_models") return models(payload.providerId as string)
     if (command === "chosen_model") return chosen
     if (command === "choose_model") onChoose?.(payload.choice)
+    if (command === "open_table") return openTable?.()
+    if (command === "read_rows") return rows?.(payload)
     return undefined
   })
   render(<Workspace />)
@@ -131,17 +144,17 @@ test("offers connections and sample datasets, with no model picker", () => {
   expect(screen.queryByRole("button", { name: "Choose a model" })).toBeNull()
 })
 
-test("says plainly that opening data isn't ready yet", async () => {
+test("says plainly that connections aren't ready yet", async () => {
   renderWorkspace()
 
   await userEvent.click(screen.getByRole("button", { name: /PostgreSQL/ }))
 
   expect(screen.getByRole("status").textContent).toBe(
-    "Opening data is the next step we're building."
+    "Connections and sample datasets are coming next."
   )
 })
 
-test("the screen responds while a file is dragged over it", async () => {
+test("the screen responds while a file is dragged over it", () => {
   renderWorkspace()
 
   act(() => drops.send({ payload: { type: "enter", paths: [], position: {} } }))
@@ -153,23 +166,199 @@ test("the screen responds while a file is dragged over it", async () => {
   ).toBeTruthy()
 })
 
-test("a dropped file is named, even with a Windows path", async () => {
-  renderWorkspace()
+const SALES_TABLE = {
+  source: {
+    path: "/data/sales.csv",
+    format: "csv",
+    encoding: "utf-8",
+    repair: "none",
+  },
+  name: "sales.csv",
+  rowCount: 2,
+  skippedRows: 0,
+  columns: [
+    { name: "region", dataType: "VARCHAR", kind: "text" },
+    { name: "amount", dataType: "BIGINT", kind: "number" },
+  ],
+}
 
+function dropFile(path: string) {
   act(() =>
-    drops.send({
-      payload: {
-        type: "drop",
-        paths: ["C:\\data\\sales.csv"],
-        position: {},
-      },
+    drops.send({ payload: { type: "drop", paths: [path], position: {} } })
+  )
+}
+
+test("dropping a file opens it in a table", async () => {
+  renderWorkspace({
+    openTable: () => SALES_TABLE,
+    rows: () => [
+      ["EMEA", "1200"],
+      ["APAC", null],
+    ],
+  })
+
+  dropFile("/data/sales.csv")
+
+  expect(await screen.findByText("EMEA")).toBeTruthy()
+  expect(screen.getByText("1200")).toBeTruthy()
+  expect(screen.getByText("null")).toBeTruthy()
+  expect(screen.getByRole("heading", { name: "sales.csv" })).toBeTruthy()
+  expect(screen.getByRole("banner").textContent).toContain("sales.csv")
+  expect(screen.getByText("2 rows, 2 columns")).toBeTruthy()
+  expect(screen.getByRole("columnheader", { name: /region/ })).toBeTruthy()
+})
+
+test("the opened file sends the source back when reading rows", async () => {
+  const onRead = vi.fn()
+  renderWorkspace({
+    openTable: () => SALES_TABLE,
+    rows: (args) => {
+      onRead(args)
+      return [["EMEA", "1"]]
+    },
+  })
+
+  dropFile("/data/sales.csv")
+  await screen.findByText("EMEA")
+
+  expect(onRead).toHaveBeenCalledWith(
+    expect.objectContaining({
+      source: SALES_TABLE.source,
+      offset: 0,
+      limit: 200,
     })
   )
+})
 
-  expect(screen.getByRole("status").textContent).toContain("sales.csv:")
+test("says why a file can't be opened and stays on Home", async () => {
+  renderWorkspace({
+    openTable: () => {
+      throw {
+        kind: "unsupported-file",
+        message: "Davis can't open a.xlsx yet.",
+      }
+    },
+  })
+
+  dropFile("/data/a.xlsx")
+
+  await waitFor(() =>
+    expect(screen.getByRole("status").textContent).toBe(
+      "Davis can't open a.xlsx yet."
+    )
+  )
   expect(
     screen.getByRole("heading", { name: "Drop files anywhere" })
   ).toBeTruthy()
+})
+
+function manyRows(args: unknown) {
+  const { offset, limit } = args as { offset: number; limit: number }
+  return Array.from({ length: limit }, (_, index) => [
+    `row ${offset + index}`,
+    String(index),
+  ])
+}
+
+async function renderLargeTable() {
+  renderWorkspace({
+    openTable: () => ({ ...SALES_TABLE, rowCount: 1_000_000 }),
+    rows: manyRows,
+  })
+  dropFile("/data/sales.csv")
+  await screen.findByText("row 0")
+  return screen.getByRole("region", { name: "Rows of sales.csv" })
+}
+
+test("the mouse wheel scrolls the table", async () => {
+  const table = await renderLargeTable()
+
+  fireEvent.wheel(table, { deltaY: 2800 })
+
+  expect(await screen.findByText("row 100")).toBeTruthy()
+  await waitFor(() => expect(screen.queryByText("row 0")).toBeNull())
+  expect(screen.getByText(/^101 to /)).toBeTruthy()
+})
+
+test("the wheel never scrolls above the first row", async () => {
+  const table = await renderLargeTable()
+
+  fireEvent.wheel(table, { deltaY: -500 })
+
+  await waitFor(() => expect(screen.getByText(/^1 to /)).toBeTruthy())
+  expect(screen.getByText("row 0")).toBeTruthy()
+})
+
+test("the keyboard reaches the end of a huge table", async () => {
+  const table = await renderLargeTable()
+
+  fireEvent.keyDown(table, { key: "End" })
+
+  expect(await screen.findByText("row 999999")).toBeTruthy()
+})
+
+test("Browse files opens the chosen file", async () => {
+  chooseFile.mockResolvedValue("/data/sales.csv")
+  renderWorkspace({
+    openTable: () => SALES_TABLE,
+    rows: () => [["EMEA", "1"]],
+  })
+
+  await userEvent.click(screen.getByRole("button", { name: "Browse files" }))
+
+  expect(await screen.findByText("EMEA")).toBeTruthy()
+})
+
+test("cancelling Browse files stays on Home", async () => {
+  chooseFile.mockResolvedValue(null)
+  renderWorkspace()
+
+  await userEvent.click(screen.getByRole("button", { name: "Browse files" }))
+
+  await waitFor(() => expect(chooseFile).toHaveBeenCalled())
+  expect(
+    screen.getByRole("heading", { name: "Drop files anywhere" })
+  ).toBeTruthy()
+})
+
+test("explains rows that had to be left out", async () => {
+  renderWorkspace({
+    openTable: () => ({
+      ...SALES_TABLE,
+      source: { ...SALES_TABLE.source, repair: "skip-bad-rows" },
+      skippedRows: 3,
+    }),
+    rows: () => [["EMEA", "1"]],
+  })
+
+  dropFile("/data/sales.csv")
+
+  expect(
+    await screen.findByText("3 rows couldn't be read and were left out.")
+  ).toBeTruthy()
+})
+
+test("a read failure can be retried", async () => {
+  const report = vi.spyOn(console, "error").mockImplementation(() => {})
+  let isDown = true
+  renderWorkspace({
+    openTable: () => SALES_TABLE,
+    rows: () => {
+      if (isDown) throw { kind: "missing-file", message: "Couldn't find it." }
+      return [["EMEA", "1"]]
+    },
+  })
+
+  dropFile("/data/sales.csv")
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Couldn't find it."
+  )
+
+  isDown = false
+  await userEvent.click(screen.getByRole("button", { name: "Try again" }))
+
+  expect(await screen.findByText("EMEA")).toBeTruthy()
+  report.mockRestore()
 })
 
 test("the sidebar opens each section", async () => {

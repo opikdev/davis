@@ -27,22 +27,34 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { ModelPicker } from "@/features/ai-setup"
-import { Home } from "@/features/home"
+import { DataView, useOpenTable, type OpenedTable } from "@/features/data"
+import { Home, useFileDrop } from "@/features/home"
 import { cn } from "@/lib/utils"
 
-function PanelHeader({ view }: { view: View }) {
+function PanelHeader({ view, table }: { view: View; table?: OpenedTable }) {
   const { state } = useSidebar()
+  const showsTable = view === "data" && table
 
   return (
     <header
       data-tauri-drag-region="deep"
       className={cn(
-        "flex h-10 shrink-0 items-center gap-2 border-b px-2",
+        "flex h-9 shrink-0 items-center gap-1.5 border-b px-1.5",
         state === "collapsed" && "macos:pl-20"
       )}
     >
       <SidebarTrigger aria-label="Toggle sidebar" />
-      <span className="text-foreground">{VIEW_LABELS[view]}</span>
+      <span
+        className={showsTable ? "text-muted-foreground" : "text-foreground"}
+      >
+        {VIEW_LABELS[view]}
+      </span>
+      {showsTable && (
+        <>
+          <span className="text-subtle">/</span>
+          <span className="truncate text-foreground">{table.name}</span>
+        </>
+      )}
     </header>
   )
 }
@@ -73,7 +85,7 @@ function EmptyView({
 
 function SettingsView() {
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 px-6 py-8">
+    <div className="mx-auto flex w-full max-w-xl flex-col gap-4 px-6 py-6">
       <h1 className="sr-only">Settings</h1>
       <Item variant="outline">
         <ItemContent>
@@ -88,12 +100,28 @@ function SettingsView() {
   )
 }
 
-function CurrentView({ view }: { view: View }) {
+type CurrentViewProps = {
+  view: View
+  files: ReturnType<typeof useOpenTable>
+  isDragging: boolean
+  onBrowse: () => void
+}
+
+function CurrentView({ view, files, isDragging, onBrowse }: CurrentViewProps) {
   switch (view) {
     case "home":
-      return <Home />
-    case "data":
       return (
+        <Home
+          isDragging={isDragging}
+          openingName={files.openingName}
+          error={files.error}
+          onBrowse={onBrowse}
+        />
+      )
+    case "data":
+      return files.table ? (
+        <DataView table={files.table} />
+      ) : (
         <EmptyView
           icon={Database01Icon}
           title="No data yet"
@@ -115,15 +143,43 @@ function CurrentView({ view }: { view: View }) {
 
 export function Workspace() {
   const [view, setView] = useState<View>("home")
+  const files = useOpenTable()
+
+  function showResult(isOpen: boolean) {
+    setView(isOpen ? "data" : "home")
+  }
+
+  async function openDropped(paths: string[]) {
+    const [path] = paths
+    if (!path) return
+    setView("home")
+    showResult(await files.open(path))
+  }
+
+  async function browse() {
+    const wasChosen = await files.browse()
+    if (wasChosen !== undefined) showResult(wasChosen)
+  }
+
+  const isDragging = useFileDrop((paths) => void openDropped(paths))
 
   return (
     <SidebarProvider className="h-svh animate-fade">
       <div data-tauri-drag-region className="fixed inset-x-0 top-0 z-20 h-1" />
-      <AppSidebar view={view} onViewChange={setView} />
+      <AppSidebar
+        view={view}
+        fileName={files.table?.name}
+        onViewChange={setView}
+      />
       <SidebarInset className="min-h-0 overflow-hidden">
-        <PanelHeader view={view} />
+        <PanelHeader view={view} table={files.table} />
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <CurrentView view={view} />
+          <CurrentView
+            view={view}
+            files={files}
+            isDragging={isDragging}
+            onBrowse={() => void browse()}
+          />
         </div>
       </SidebarInset>
     </SidebarProvider>

@@ -8,12 +8,12 @@ import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import mysqlIcon from "@/features/home/connection-icons/mysql.svg"
 import postgresqlIcon from "@/features/home/connection-icons/postgresql.svg"
-import { useFileDrop } from "@/features/home/use-file-drop"
 import { cn } from "@/lib/utils"
 
-const NOT_READY = "Opening data is the next step we're building."
+const NOT_READY = "Connections and sample datasets are coming next."
 
 const CONNECTIONS = [
   { logo: postgresqlIcon, color: "#336791", name: "PostgreSQL" },
@@ -25,10 +25,6 @@ const DATASETS: { icon: IconSvgElement; name: string; size: string }[] = [
   { icon: Megaphone01Icon, name: "Bank marketing", size: "45K rows" },
   { icon: Bicycle01Icon, name: "Bike sharing", size: "17K rows" },
 ]
-
-function fileName(path: string) {
-  return path.split(/[\\/]/).pop() ?? path
-}
 
 function SourceRow({
   tile,
@@ -45,7 +41,7 @@ function SourceRow({
     <Button
       variant="ghost"
       onClick={onClick}
-      className="h-9 w-full justify-start gap-2.5 px-2 font-normal"
+      className="h-7 w-full justify-start gap-2 px-1.5 font-normal"
     >
       {tile}
       {name}
@@ -66,19 +62,28 @@ function SourceCard({
   children: React.ReactNode
 }) {
   return (
-    <section className="flex flex-col rounded-xl border bg-background p-1.5">
-      <h2 className="px-2 pt-1.5 pb-1 text-xs text-subtle">{title}</h2>
+    <section className="flex flex-col rounded-xl border bg-background p-1">
+      <h2 className="px-1.5 pt-1 pb-0.5 text-xs text-subtle">{title}</h2>
       {children}
     </section>
   )
 }
 
-export function Home() {
+type HomeProps = {
+  isDragging: boolean
+  openingName?: string
+  error?: string
+  onBrowse: () => void
+}
+
+export function Home({ isDragging, openingName, error, onBrowse }: HomeProps) {
   const [notice, setNotice] = useState("")
-  const isDragging = useFileDrop((paths) =>
-    setNotice(`${fileName(paths[0] ?? "")}: ${NOT_READY.toLowerCase()}`)
-  )
   const showNotReady = () => setNotice(NOT_READY)
+  const title = openingName
+    ? `Opening ${openingName}`
+    : isDragging
+      ? "Drop to open"
+      : "Drop files anywhere"
 
   return (
     <div className="relative flex flex-1 flex-col items-center justify-center overflow-hidden px-6 pb-10">
@@ -103,23 +108,28 @@ export function Home() {
           !isDragging && "scale-[0.985] opacity-0"
         )}
       />
-      <div className="relative flex w-full max-w-138 animate-stagger flex-col">
+      <div className="relative flex w-full max-w-116 animate-stagger flex-col">
         <div className="flex flex-col items-center gap-1 text-center">
           <h1 className="text-xl font-medium">
-            <span key={String(isDragging)} className="block animate-fade">
-              {isDragging ? "Drop to open" : "Drop files anywhere"}
+            <span key={title} className="block animate-fade">
+              {title}
             </span>
           </h1>
           <p className="text-muted-foreground">
-            CSV, Parquet, JSON, Excel, or SQLite. They stay on this computer.
+            CSV, Parquet, or JSON. They stay on this computer.
           </p>
-          <Button onClick={showNotReady} className="mt-4">
+          <Button
+            onClick={onBrowse}
+            disabled={Boolean(openingName)}
+            className="mt-3"
+          >
+            {openingName && <Spinner data-icon="inline-start" />}
             Browse files
           </Button>
         </div>
         <div
           className={cn(
-            "mt-10 grid grid-cols-2 gap-2.5 transition-[opacity,scale] duration-300 ease-native",
+            "mt-8 grid grid-cols-2 gap-2 transition-[opacity,scale] duration-300 ease-native",
             isDragging && "scale-[0.985] opacity-30"
           )}
         >
@@ -131,13 +141,13 @@ export function Home() {
                 onClick={showNotReady}
                 tile={
                   <span
-                    className="grid size-5 shrink-0 place-items-center rounded-md"
+                    className="grid size-4.5 shrink-0 place-items-center rounded-sm"
                     style={{ backgroundColor: color }}
                   >
                     <img
                       src={logo}
                       alt=""
-                      className="size-3.5 brightness-0 invert"
+                      className="size-3 brightness-0 invert"
                     />
                   </span>
                 }
@@ -148,8 +158,12 @@ export function Home() {
               detail="S3, web link"
               onClick={showNotReady}
               tile={
-                <span className="grid size-5 shrink-0 place-items-center rounded-md bg-muted">
-                  <HugeiconsIcon icon={CloudIcon} strokeWidth={1.5} />
+                <span className="grid size-4.5 shrink-0 place-items-center rounded-sm bg-muted">
+                  <HugeiconsIcon
+                    icon={CloudIcon}
+                    strokeWidth={1.5}
+                    className="size-3"
+                  />
                 </span>
               }
             />
@@ -162,16 +176,26 @@ export function Home() {
                 detail={size}
                 onClick={showNotReady}
                 tile={
-                  <span className="grid size-5 shrink-0 place-items-center rounded-md bg-muted">
-                    <HugeiconsIcon icon={icon} strokeWidth={1.5} />
+                  <span className="grid size-4.5 shrink-0 place-items-center rounded-sm bg-muted">
+                    <HugeiconsIcon
+                      icon={icon}
+                      strokeWidth={1.5}
+                      className="size-3"
+                    />
                   </span>
                 }
               />
             ))}
           </SourceCard>
         </div>
-        <p role="status" className="mt-3 h-4 text-center text-xs text-subtle">
-          {notice}
+        <p
+          role="status"
+          className={cn(
+            "mt-3 min-h-4 text-center text-xs text-subtle",
+            error && "text-destructive"
+          )}
+        >
+          {error ?? notice}
         </p>
       </div>
     </div>

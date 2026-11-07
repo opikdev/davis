@@ -1,6 +1,7 @@
 import {
   DashboardSquare01Icon,
   Database01Icon,
+  File02Icon,
   Home01Icon,
   Settings01Icon,
 } from "@hugeicons/core-free-icons"
@@ -13,6 +14,7 @@ import {
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -37,10 +39,11 @@ const MAIN_ITEMS: { view: View; icon: IconSvgElement }[] = [
 
 type AppSidebarProps = {
   view: View
+  fileName?: string
   onViewChange: (view: View) => void
 }
 
-export function AppSidebar({ view, onViewChange }: AppSidebarProps) {
+export function AppSidebar({ view, fileName, onViewChange }: AppSidebarProps) {
   const { state } = useSidebar()
 
   return (
@@ -54,7 +57,7 @@ export function AppSidebar({ view, onViewChange }: AppSidebarProps) {
         data-tauri-drag-region="deep"
         className="h-8 flex-row items-center justify-end px-2 py-0"
       >
-        <DavisMark className="size-4 text-foreground" />
+        <DavisMark className="size-3.5 text-foreground" />
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
@@ -72,6 +75,22 @@ export function AppSidebar({ view, onViewChange }: AppSidebarProps) {
             ))}
           </SidebarMenu>
         </SidebarGroup>
+        {fileName && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Open file</SidebarGroupLabel>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  title={fileName}
+                  onClick={() => onViewChange("data")}
+                >
+                  <HugeiconsIcon icon={File02Icon} strokeWidth={1.5} />
+                  <span className="truncate">{fileName}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
       </SidebarContent>
       <SidebarFooter className="flex-row items-center gap-1">
         <SidebarMenu className="min-w-0 flex-1">
