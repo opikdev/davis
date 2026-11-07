@@ -170,9 +170,15 @@ fn ask_app(
         "codex" => read_codex_line,
         _ => read_plain_line,
     };
-    let finished = run_lines(&binary, &arguments, APP_TIME_LIMIT, stop, |line| {
-        parse(line, &mut reply, on_progress);
-    });
+    let environment = app_environment(provider);
+    let finished = run_lines(
+        &binary,
+        &arguments,
+        &environment,
+        APP_TIME_LIMIT,
+        stop,
+        |line| parse(line, &mut reply, on_progress),
+    );
 
     if stop.load(Ordering::Relaxed) {
         return Err(Error::Stopped);
@@ -278,6 +284,27 @@ fn sql_so_far(reply: &str) -> String {
 }
 
 // Each tool runs with its own tools off, so it can only answer and can't touch files.
+// The read-only sandbox only blocks writes, so with a shell Codex can read the
+// user's file. Its sub-agents stay listed but inherit no way to read.
+const CODEX_DISABLED_FEATURES: [&str; 6] = [
+    "shell_tool",
+    "unified_exec",
+    "apps",
+    "plugins",
+    "multi_agent",
+    "view_image",
+];
+
+// The plan agent can still read files, run commands and use the web.
+const OPENCODE_NO_TOOLS: &str = r#"{"permission":{"*":"deny"},"tools":{"*":false},"mcp":{}}"#;
+
+fn app_environment(provider: &Provider) -> Vec<(&'static str, &'static str)> {
+    match provider.id.as_str() {
+        "opencode" => vec![("OPENCODE_CONFIG_CONTENT", OPENCODE_NO_TOOLS)],
+        _ => Vec::new(),
+    }
+}
+
 fn app_arguments(
     provider: &Provider,
     choice: &ChosenModel,
@@ -315,11 +342,17 @@ fn app_arguments(
                 "--json",
                 "--skip-git-repo-check",
                 "--ephemeral",
+                "--ignore-user-config",
                 "--sandbox",
                 "read-only",
                 "-m",
                 &choice.model_id,
+                "-c",
+                "web_search=\"disabled\"",
             ]);
+            for feature in CODEX_DISABLED_FEATURES {
+                push(&["--disable", feature]);
+            }
             if let Some(effort) = &choice.effort {
                 push(&["-c", &format!("model_reasoning_effort=\"{effort}\"")]);
             }
@@ -552,13 +585,38 @@ mod tests {
     }
 
     #[test]
-    fn codex_runs_read_only() {
+    fn codex_runs_with_no_way_to_read_files() {
         let arguments = arguments_for("codex", Some("xhigh"));
 
         assert!(
             arguments
                 .windows(2)
                 .any(|pair| pair == ["--sandbox", "read-only"])
+        );
+        assert!(
+            arguments
+                .iter()
+                .any(|value| value == "--ignore-user-config")
+        );
+        for feature in [
+            "shell_tool",
+            "unified_exec",
+            "apps",
+            "plugins",
+            "multi_agent",
+            "view_image",
+        ] {
+            assert!(
+                arguments
+                    .windows(2)
+                    .any(|pair| pair == ["--disable", feature]),
+                "{feature} is still on"
+            );
+        }
+        assert!(
+            arguments
+                .iter()
+                .any(|value| value == "web_search=\"disabled\"")
         );
         assert!(
             arguments
@@ -659,6 +717,25 @@ mod tests {
         let arguments = arguments_for("opencode", None);
 
         assert!(arguments.windows(2).any(|pair| pair == ["--agent", "plan"]));
+    }
+
+    #[test]
+    fn opencode_runs_with_every_tool_denied() {
+        let environment = app_environment(find_provider("opencode").unwrap());
+
+        assert_eq!(
+            environment,
+            [(
+                "OPENCODE_CONFIG_CONTENT",
+                r#"{"permission":{"*":"deny"},"tools":{"*":false},"mcp":{}}"#
+            )]
+        );
+    }
+
+    #[test]
+    fn other_apps_keep_their_own_environment() {
+        assert!(app_environment(find_provider("claude-code").unwrap()).is_empty());
+        assert!(app_environment(find_provider("codex").unwrap()).is_empty());
     }
 
     #[test]

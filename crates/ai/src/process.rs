@@ -28,12 +28,14 @@ pub(crate) fn hidden_command(program: impl AsRef<OsStr>) -> Command {
 pub(crate) fn run_lines(
     binary: &Path,
     arguments: &[&str],
+    environment: &[(&str, &str)],
     limit: Duration,
     stop: &AtomicBool,
     mut on_line: impl FnMut(&str),
 ) -> Option<bool> {
     let mut child = hidden_command(binary)
         .args(arguments)
+        .envs(environment.iter().copied())
         .current_dir(std::env::temp_dir())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
