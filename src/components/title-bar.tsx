@@ -5,7 +5,7 @@ export function TitleBar({ label }: { label?: string }) {
   return (
     <header
       data-tauri-drag-region="deep"
-      className="flex h-12 shrink-0 items-center justify-between px-6 macos:pl-23"
+      className="flex h-10 shrink-0 items-center justify-between border-b px-3 macos:pl-20"
     >
       <div className="flex items-center gap-2 text-sm font-medium">
         <DavisMark className="size-3.5" />

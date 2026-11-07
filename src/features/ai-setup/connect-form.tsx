@@ -153,9 +153,7 @@ export function ConnectForm({
         {asksForUrl && (
           <Field data-invalid={Boolean(urlError)}>
             <div className="flex items-center justify-between gap-3">
-              <FieldLabel htmlFor={urlInputId} className="text-sm">
-                Address
-              </FieldLabel>
+              <FieldLabel htmlFor={urlInputId}>Address</FieldLabel>
               {isLocal && provider.downloadUrl && (
                 <ExternalLink
                   href={provider.downloadUrl}
@@ -181,7 +179,7 @@ export function ConnectForm({
               required
               aria-invalid={Boolean(urlError)}
               aria-describedby={urlError ? `${urlInputId}-error` : undefined}
-              className="h-9 text-sm text-foreground md:text-sm"
+              className="text-foreground"
             />
             {urlError && (
               <FieldError
@@ -196,7 +194,7 @@ export function ConnectForm({
         {asksForKey && (
           <Field data-invalid={Boolean(keyError)}>
             <div className="flex items-center justify-between gap-3">
-              <FieldLabel htmlFor={keyInputId} className="text-sm">
+              <FieldLabel htmlFor={keyInputId}>
                 API key{provider.keyOptional ? " (optional)" : ""}
               </FieldLabel>
               {provider.keyUrl && (
@@ -209,7 +207,7 @@ export function ConnectForm({
                 </ExternalLink>
               )}
             </div>
-            <InputGroup className="h-9">
+            <InputGroup>
               <InputGroupInput
                 ref={keyInput}
                 id={keyInputId}
@@ -228,7 +226,7 @@ export function ConnectForm({
                 autoCorrect="off"
                 autoComplete="off"
                 required={!provider.keyOptional}
-                className="text-sm text-foreground md:text-sm"
+                className="text-foreground"
               />
               <InputGroupAddon align="inline-end">
                 <InputGroupButton
@@ -278,19 +276,13 @@ export function ConnectForm({
         <Button
           type="button"
           variant="ghost"
-          size="xl"
           onClick={onBack}
           disabled={isConnecting}
           focusableWhenDisabled
         >
           Back
         </Button>
-        <Button
-          type="submit"
-          size="xl"
-          disabled={isConnecting}
-          focusableWhenDisabled
-        >
+        <Button type="submit" disabled={isConnecting} focusableWhenDisabled>
           {isConnecting && <Spinner />}
           {isConnecting ? "Connecting…" : connectAction}
         </Button>

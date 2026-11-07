@@ -6,6 +6,7 @@ import {
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react"
 import { useEffect } from "react"
 
+import { DataDots } from "@/components/data-dots"
 import { StepLayout } from "@/components/step-layout"
 import { Button } from "@/components/ui/button"
 import {
@@ -16,7 +17,6 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item"
-import { DataDots } from "@/features/onboarding/data-dots"
 import { playOpeningSound } from "@/lib/sound/player"
 
 const HIGHLIGHTS: { icon: IconSvgElement; title: string; detail: string }[] = [
@@ -55,11 +55,7 @@ export function WelcomeStep({
           Open source. No account needed.
         </span>
       }
-      trailingAction={
-        <Button size="xl" onClick={onContinue}>
-          Get started
-        </Button>
-      }
+      trailingAction={<Button onClick={onContinue}>Get started</Button>}
     >
       <DataDots />
       <ItemGroup className="animate-stagger gap-1">
@@ -73,8 +69,8 @@ export function WelcomeStep({
               />
             </ItemMedia>
             <ItemContent className="gap-0.5">
-              <ItemTitle className="text-sm">{title}</ItemTitle>
-              <ItemDescription className="text-sm">{detail}</ItemDescription>
+              <ItemTitle>{title}</ItemTitle>
+              <ItemDescription>{detail}</ItemDescription>
             </ItemContent>
           </Item>
         ))}

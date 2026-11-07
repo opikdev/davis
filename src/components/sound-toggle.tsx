@@ -16,7 +16,7 @@ export function SoundToggle() {
         setSoundOn(next)
         setIsOn(next)
       }}
-      className="text-muted-foreground aria-pressed:bg-transparent"
+      className="shrink-0 text-muted-foreground aria-pressed:bg-transparent"
     >
       <HugeiconsIcon
         key={String(isOn)}

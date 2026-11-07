@@ -7,13 +7,25 @@ import {
   within,
 } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { afterEach, expect, test } from "vitest"
+import { afterEach, beforeEach, expect, test, vi } from "vitest"
 
 import { App } from "@/app/app"
+
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({ onDragDropEvent: async () => () => {} }),
+}))
+
+beforeEach(() => {
+  vi.stubGlobal("matchMedia", () => ({
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  }))
+})
 
 afterEach(() => {
   cleanup()
   clearMocks()
+  vi.unstubAllGlobals()
 })
 
 function mockBackend(onboardingStatus: () => unknown) {
@@ -23,6 +35,7 @@ function mockBackend(onboardingStatus: () => unknown) {
     if (command === "onboarding_status") return onboardingStatus()
     if (command === "detect_ai_tools")
       return { apps: [], localServers: [], hasNpm: true }
+    if (command === "connected_providers") return []
     return undefined
   })
   return commands
@@ -43,7 +56,9 @@ test("skips onboarding once it is complete", async () => {
 
   render(<App />)
 
-  expect(await screen.findByRole("main", { name: "Davis" })).toBeTruthy()
+  expect(
+    await screen.findByRole("heading", { name: "Drop files anywhere" })
+  ).toBeTruthy()
   expect(screen.queryByRole("button", { name: "Get started" })).toBeNull()
 })
 
@@ -81,18 +96,4 @@ test("the window can be dragged from the top of onboarding", async () => {
   expect(
     within(titleBar).getByRole("button", { name: "Sound effects" })
   ).toBeTruthy()
-})
-
-test("after onboarding the screen shows only the logo, and still drags", async () => {
-  mockBackend(() => ({ isComplete: true }))
-
-  render(<App />)
-
-  const screenContent = await screen.findByRole("main", { name: "Davis" })
-  expect(screenContent.textContent).toBe("")
-  expect(screenContent.querySelector("svg")).toBeTruthy()
-  expect(screen.queryByRole("button")).toBeNull()
-  expect(
-    screen.getByRole("banner").getAttribute("data-tauri-drag-region")
-  ).toBe("deep")
 })

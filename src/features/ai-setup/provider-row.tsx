@@ -195,7 +195,7 @@ export function ProviderRow({
     }
     if (state.status === "connecting") {
       return (
-        <Button variant="outline" size="lg" disabled>
+        <Button variant="outline" size="sm" disabled>
           <Spinner />
           Connecting…
         </Button>
@@ -225,7 +225,7 @@ export function ProviderRow({
       return canInstall ? (
         <Button
           variant="outline"
-          size="lg"
+          size="sm"
           aria-label={`Install ${name}`}
           onClick={keepFocus(onInstall)}
         >
@@ -234,7 +234,7 @@ export function ProviderRow({
       ) : (
         <Button
           variant="outline"
-          size="lg"
+          size="sm"
           aria-label={`Get ${name}`}
           onClick={onGet}
         >
@@ -246,7 +246,7 @@ export function ProviderRow({
       return (
         <Button
           variant="outline"
-          size="lg"
+          size="sm"
           aria-label={`Sign in to ${name}`}
           onClick={keepFocus(onSignIn)}
         >
@@ -257,7 +257,7 @@ export function ProviderRow({
     return (
       <Button
         variant="outline"
-        size="lg"
+        size="sm"
         aria-label={`Connect ${name}`}
         onClick={keepFocus(onConnect)}
       >
@@ -272,7 +272,7 @@ export function ProviderRow({
         <BrandIcon icon={provider.icon} />
       </ItemMedia>
       <ItemContent className="min-w-0 gap-0.5">
-        <ItemTitle className="text-sm">{name}</ItemTitle>
+        <ItemTitle>{name}</ItemTitle>
         {detail && (
           <ItemDescription
             key={state.status}

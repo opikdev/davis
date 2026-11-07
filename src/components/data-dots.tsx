@@ -2,11 +2,12 @@ const COLUMN_HEIGHTS = [
   1, 1, 2, 1, 2, 3, 2, 3, 2, 3, 4, 3, 4, 5, 4, 3, 4, 5, 6, 5, 4, 5, 6, 7, 6, 5,
   6, 7, 8, 7,
 ]
-const ROWS = 8
 const GAP = 8
 const RADIUS = 1.5
 const COLUMN_DELAY_MS = 28
 const ROW_DELAY_MS = 40
+
+const ROWS = 8
 
 export function DataDots() {
   const dots = COLUMN_HEIGHTS.flatMap((height, column) =>
@@ -21,7 +22,7 @@ export function DataDots() {
     <svg
       viewBox={`0 0 ${COLUMN_HEIGHTS.length * GAP} ${ROWS * GAP}`}
       aria-hidden="true"
-      className="w-full text-foreground"
+      className={"w-full text-primary"}
     >
       {dots.map(({ column, row, isCharted }) => (
         <circle

@@ -134,7 +134,7 @@ export function AddAiDialog({
         }
       >
         <DialogHeader>
-          <DialogTitle className="text-base font-medium">
+          <DialogTitle>
             <span key={form?.provider.id} className="block animate-fade">
               {form
                 ? `Connect ${form.provider.connectLabel ?? form.provider.name}`
@@ -166,7 +166,7 @@ export function AddAiDialog({
             </div>
           ) : (
             <>
-              <InputGroup className="h-9">
+              <InputGroup>
                 <InputGroupAddon>
                   <HugeiconsIcon icon={Search01Icon} strokeWidth={1.5} />
                 </InputGroupAddon>
@@ -178,7 +178,6 @@ export function AddAiDialog({
                   onChange={(event) => setQuery(event.target.value)}
                   spellCheck={false}
                   autoCorrect="off"
-                  className="text-sm md:text-sm"
                 />
                 {query && (
                   <InputGroupAddon align="inline-end" className="animate-pop">
@@ -202,9 +201,7 @@ export function AddAiDialog({
                 {groups.length === 0 && (
                   <Empty className="animate-fade border-0">
                     <EmptyHeader>
-                      <EmptyTitle className="text-sm">
-                        No results for "{query}"
-                      </EmptyTitle>
+                      <EmptyTitle>No results for "{query}"</EmptyTitle>
                       <EmptyDescription>
                         Use a custom URL for any other OpenAI-compatible
                         service.
@@ -214,7 +211,7 @@ export function AddAiDialog({
                       <EmptyContent>
                         <Button
                           variant="outline"
-                          size="lg"
+                          size="sm"
                           onClick={() => openForm({ provider: customUrl })}
                         >
                           Use a custom URL

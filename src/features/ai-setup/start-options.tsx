@@ -55,7 +55,7 @@ export function StartOptions({
           key={group}
           variant="outline"
           render={<button type="button" onClick={() => onSelect(group)} />}
-          className="cursor-pointer text-left transition-all hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 active:scale-[0.99]"
+          className="cursor-pointer text-left transition-all hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40 active:scale-[0.99]"
         >
           <ItemMedia className="self-center!">
             <HugeiconsIcon
@@ -65,7 +65,7 @@ export function StartOptions({
             />
           </ItemMedia>
           <ItemContent className="gap-0.5">
-            <ItemTitle className="text-sm">{title}</ItemTitle>
+            <ItemTitle>{title}</ItemTitle>
             <ItemDescription>{detail}</ItemDescription>
           </ItemContent>
           <ItemActions>

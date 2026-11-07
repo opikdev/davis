@@ -144,25 +144,19 @@ export function AiSetup({
       title={title()}
       description={description()}
       leadingAction={
-        <Button variant="ghost" size="xl" onClick={onBack} className="-ml-4">
+        <Button variant="ghost" onClick={onBack} className="-ml-3.5">
           Back
         </Button>
       }
       trailingAction={
         isReady ? (
-          <Button
-            key="start"
-            size="xl"
-            onClick={onDone}
-            className="animate-pop"
-          >
+          <Button key="start" onClick={onDone} className="animate-pop">
             Start using Davis
           </Button>
         ) : (
           <Button
             key="skip"
             variant="ghost"
-            size="xl"
             onClick={onDone}
             disabled={isDetecting}
           >
@@ -196,7 +190,7 @@ export function AiSetup({
             <StartOptions onSelect={(group) => setDialog({ group })} />
           ) : (
             <div>
-              <Button variant="outline" size="lg" onClick={() => setDialog({})}>
+              <Button variant="outline" size="sm" onClick={() => setDialog({})}>
                 <HugeiconsIcon
                   icon={PlusSignIcon}
                   strokeWidth={1.5}

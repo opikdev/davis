@@ -24,7 +24,7 @@ export function ExternalLink({
       nativeButton={false}
       variant="link"
       aria-label={label}
-      className={cn("h-auto gap-0.5 p-0 text-sm", className)}
+      className={cn("h-auto gap-0.5 p-0", className)}
       onClick={(event) => {
         event.preventDefault()
         openExternal(href)
