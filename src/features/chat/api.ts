@@ -80,6 +80,7 @@ export function askProject(
     question: string
     activeTable: string | null
     activePage: string | null
+    activeBlock: string | null
     history: PastTurn[]
   },
   onStep: (step: AskStep) => void

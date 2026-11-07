@@ -34,19 +34,6 @@ vi.mock("@/components/ui/resizable", () => ({
   ResizableHandle: () => null,
 }))
 
-// The grid measures real layout too.
-vi.mock("react-grid-layout", () => ({
-  default: ({ children }: { children: React.ReactNode }) => (
-    <div>{children}</div>
-  ),
-  useContainerWidth: () => ({
-    width: 800,
-    containerRef: { current: null },
-    mounted: true,
-  }),
-  verticalCompactor: {},
-}))
-
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: chooseFile }))
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText }))
 
@@ -118,6 +105,7 @@ type Backend = {
   onCombine?: (args: unknown) => unknown
   pages?: PageFixture[]
   onRunPage?: (page: unknown) => void
+  onBuild?: (spec: unknown) => void
   project?: ProjectFixture
   saved?: SavedChatFixture[]
   onSaveChat?: (chat: unknown) => void
@@ -149,49 +137,77 @@ type BlockFixture = {
   xColumn: string | null
   yColumn: string | null
   text: string | null
-  table: string | null
-  column: string | null
+}
+
+type FilterFixture = {
+  id: string
+  table: string
+  column: string
+  kind: string
   values: string[]
+  from: string | null
+  to: string | null
 }
 
 type PageFixture = {
   id: string
   title: string
   updatedAt: number
-  blocks: BlockFixture[]
+  rows: { id: string; blocks: BlockFixture[] }[]
+  filters: FilterFixture[]
 }
 
 const BLANK_BLOCK = {
   kind: "text",
-  x: 0,
-  y: 0,
-  w: 6,
-  h: 8,
   title: "",
+  weight: 1,
   sql: null,
+  trendSql: null,
+  spec: null,
   view: null,
   xColumn: null,
   yColumn: null,
+  seriesColumn: null,
+  format: null,
+  showLabels: true,
+  sort: null,
+  limit: null,
   text: null,
-  table: null,
-  column: null,
-  values: [],
+  sources: {},
+}
+
+function inRows(...blocks: BlockFixture[]) {
+  return blocks.map((block) => ({ id: `row-${block.id}`, blocks: [block] }))
+}
+
+function blocksOf(page: PageFixture) {
+  return page.rows.flatMap((row) => row.blocks)
 }
 
 function pageResult(block: BlockFixture) {
   if (block.sql === "BROKEN") {
-    return { id: block.id, result: null, error: "That query failed." }
+    return {
+      id: block.id,
+      result: null,
+      error: "That query failed.",
+      trend: null,
+      sources: {},
+    }
   }
   if (block.sql === "EMPTY") {
     return {
       id: block.id,
       error: null,
+      trend: null,
+      sources: {},
       result: { columns: [], rows: [], isTruncated: false },
     }
   }
   return {
     id: block.id,
     error: null,
+    trend: null,
+    sources: {},
     result: {
       columns: [
         { name: "region", dataType: "VARCHAR", kind: "text" },
@@ -224,6 +240,7 @@ function renderWorkspace({
   onCombine,
   pages = [],
   onRunPage,
+  onBuild,
   project: existing,
   saved = [],
   onSaveChat,
@@ -252,10 +269,16 @@ function renderWorkspace({
       const page = savedPages.get(payload.id as string) as PageFixture
       const block = {
         ...BLANK_BLOCK,
-        id: `b${page.blocks.length}`,
+        id: `b${blocksOf(page).length}`,
         ...(payload.block as object),
       }
-      const next = { ...page, blocks: [...page.blocks, block] }
+      const next = { ...page, rows: [...page.rows, ...inRows(block)] }
+      savedPages.set(page.id, next)
+      return next
+    }
+    if (command === "draft_page") {
+      const page = savedPages.get(payload.id as string) as PageFixture
+      const next = { ...page, rows: inRows(DRAFTED_BLOCK) }
       savedPages.set(page.id, next)
       return next
     }
@@ -263,16 +286,38 @@ function renderWorkspace({
       onRunPage?.(payload.page)
       const page = payload.page as PageFixture
       return {
-        blocks: page.blocks.flatMap((block) =>
+        blocks: blocksOf(page).flatMap((block) =>
           block.sql ? [pageResult(block)] : []
         ),
-        filters: page.blocks.flatMap((block) =>
-          block.values.length > 0
-            ? [{ id: block.id, files: ["sales.csv", "orders.csv"] }]
+        filters: page.filters.flatMap((filter) =>
+          filter.values.length > 0 || filter.from
+            ? [{ id: filter.id, files: ["sales.csv", "orders.csv"] }]
             : []
         ),
       }
     }
+    if (command === "project_columns") {
+      return [
+        {
+          table: "sales.csv",
+          columns: [
+            { name: "region", dataType: "VARCHAR", kind: "text" },
+            { name: "total", dataType: "BIGINT", kind: "number" },
+          ],
+        },
+      ]
+    }
+    if (command === "build_block_query") {
+      onBuild?.(payload.spec)
+      return {
+        sql: "SELECT built",
+        trendSql: null,
+        xColumn: "region",
+        yColumn: "total",
+        seriesColumn: null,
+      }
+    }
+    if (command === "filter_bounds") return ["2026-01-01", "2026-04-30"]
     if (command === "filter_options") return ["EMEA", "APAC"]
     if (command === "data_files_in") return payload.paths
     if (command === "check_data_file") return openTable?.()
@@ -1179,11 +1224,20 @@ test("links from other files aren't offered on this one", async () => {
   )
 })
 
+const DRAFTED_BLOCK = {
+  ...BLANK_BLOCK,
+  id: "drafted",
+  kind: "figure",
+  title: "Total amount",
+  sql: "SELECT 1",
+  view: "table",
+}
+
 const OVERVIEW: PageFixture = {
   id: "page-1",
   title: "Overview",
   updatedAt: 1,
-  blocks: [
+  rows: inRows(
     {
       ...BLANK_BLOCK,
       id: "b1",
@@ -1199,14 +1253,17 @@ const OVERVIEW: PageFixture = {
       title: "Broken one",
       sql: "BROKEN",
       view: "table",
-    },
+    }
+  ),
+  filters: [
     {
-      ...BLANK_BLOCK,
-      id: "b3",
-      kind: "filter",
-      title: "region",
+      id: "f1",
       table: "sales.csv",
       column: "region",
+      kind: "values",
+      values: [],
+      from: null,
+      to: null,
     },
   ],
 }
@@ -1229,19 +1286,40 @@ async function startNewChat() {
 
 async function openOverview() {
   await userEvent.click(await screen.findByRole("button", { name: "Overview" }))
+  await screen.findByRole("heading", { name: "Overview", level: 1 })
 }
 
-test("New Page creates a Page and opens it", async () => {
+async function startEditing() {
+  await userEvent.click(await screen.findByRole("button", { name: "Edit" }))
+}
+
+test("New Page offers starting points that work without the AI", async () => {
   renderWorkspace(projectBackend())
   await screen.findByText("Saved answer")
 
   await userEvent.click(screen.getByRole("button", { name: "New Page" }))
+  await userEvent.click(
+    await screen.findByRole("button", { name: /^Overview/ })
+  )
+
+  expect(
+    await screen.findByRole("heading", { name: "Total amount" })
+  ).toBeTruthy()
+})
+
+test("a blank Page opens ready to edit", async () => {
+  renderWorkspace(projectBackend())
+  await screen.findByText("Saved answer")
+
+  await userEvent.click(screen.getByRole("button", { name: "New Page" }))
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Start with a blank Page" })
+  )
 
   expect(await screen.findByLabelText("Page title")).toHaveProperty(
     "value",
     "Untitled page"
   )
-  expect(screen.getByText("Nothing on this Page yet")).toBeTruthy()
 })
 
 test("a Page runs its blocks, and one failure stays in its block", async () => {
@@ -1265,7 +1343,9 @@ test("a filtered chart keeps showing with a single bar", async () => {
     xColumn: "region",
     yColumn: "total",
   }
-  renderWorkspace(pageBackend({ pages: [{ ...OVERVIEW, blocks: [chart] }] }))
+  renderWorkspace(
+    pageBackend({ pages: [{ ...OVERVIEW, rows: inRows(chart) }] })
+  )
 
   await openOverview()
 
@@ -1281,7 +1361,9 @@ test("a block says so when a filter leaves it nothing to show", async () => {
     sql: "EMPTY",
     view: "bar",
   }
-  renderWorkspace(pageBackend({ pages: [{ ...OVERVIEW, blocks: [empty] }] }))
+  renderWorkspace(
+    pageBackend({ pages: [{ ...OVERVIEW, rows: inRows(empty) }] })
+  )
 
   await openOverview()
 
@@ -1291,6 +1373,7 @@ test("a block says so when a filter leaves it nothing to show", async () => {
 test("renaming a Page saves on leaving the title", async () => {
   renderWorkspace(pageBackend())
   await openOverview()
+  await startEditing()
 
   const title = await screen.findByLabelText("Page title")
   await userEvent.clear(title)
@@ -1312,9 +1395,7 @@ test("choosing a filter value runs the Page again with it", async () => {
 
   await waitFor(() => expect(onRunPage).toHaveBeenCalledTimes(2))
   expect(onRunPage.mock.lastCall?.[0]).toMatchObject({
-    blocks: expect.arrayContaining([
-      expect.objectContaining({ id: "b3", values: ["EMEA"] }),
-    ]),
+    filters: [expect.objectContaining({ id: "f1", values: ["EMEA"] })],
   })
   expect(
     await screen.findByText("Filtering sales.csv, orders.csv")
@@ -1331,7 +1412,7 @@ test("an answer can be pinned to a Page", async () => {
         chats: [],
         pages: [{ id: "page-1", title: "Overview", updatedAt: 1 }],
       },
-      pages: [{ ...OVERVIEW, blocks: [] }],
+      pages: [{ ...OVERVIEW, rows: [] }],
     })
   )
   await screen.findByText("EMEA")
@@ -1347,17 +1428,15 @@ test("an answer can be pinned to a Page", async () => {
   expect(
     await screen.findByRole("heading", { name: "Totals", level: 2 })
   ).toBeTruthy()
-  expect(await screen.findByLabelText("Page title")).toHaveProperty(
-    "value",
-    "Overview"
-  )
+  expect(
+    await screen.findByRole("heading", { name: "Overview", level: 1 })
+  ).toBeTruthy()
 })
 
 test("the chat beside a Page tells the AI which Page is open", async () => {
   const ask = vi.fn<(args: unknown) => unknown>(() => SALES_ANSWER)
   renderWorkspace(pageBackend({ ask }))
   await openOverview()
-  await screen.findByLabelText("Page title")
   await startNewChat()
 
   await askQuestion("Add a chart")
@@ -1397,6 +1476,8 @@ test("a Page can't be edited while the AI works on it", async () => {
   renderWorkspace(pageBackend({ ask: () => new Promise(() => {}) }))
   await openOverview()
   await screen.findByText("That query failed.")
+  await startEditing()
+  await screen.findByRole("button", { name: "Remove Totals" })
   await startNewChat()
 
   await askQuestion("Add a chart")
@@ -1404,13 +1485,83 @@ test("a Page can't be edited while the AI works on it", async () => {
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: "Remove Totals" })).toBeNull()
   )
-  expect(screen.getByLabelText("Page title")).toHaveProperty("readOnly", true)
+  expect(screen.getByRole("button", { name: "Edit" })).toHaveProperty(
+    "disabled",
+    true
+  )
+})
+
+test("Undo brings back a removed block", async () => {
+  renderWorkspace(pageBackend())
+  await openOverview()
+  await startEditing()
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Remove Totals" })
+  )
+  expect(screen.queryByRole("heading", { name: "Totals" })).toBeNull()
+
+  await userEvent.click(screen.getByRole("button", { name: "Undo" }))
+
+  expect(await screen.findByRole("heading", { name: "Totals" })).toBeTruthy()
+})
+
+test("a block can be rebuilt from its settings without SQL", async () => {
+  const onBuild = vi.fn()
+  const onRunPage = vi.fn()
+  renderWorkspace(pageBackend({ onBuild, onRunPage }))
+  await openOverview()
+  await startEditing()
+
+  await userEvent.click(await screen.findByRole("heading", { name: "Totals" }))
+  const settings = await screen.findByRole("complementary", {
+    name: "Block settings",
+  })
+  await userEvent.click(
+    within(settings).getByRole("button", { name: "Replace with choices" })
+  )
+  await userEvent.click(await within(settings).findByLabelText("Measure"))
+  await userEvent.click(
+    await screen.findByRole("option", { name: "Average of" })
+  )
+
+  await waitFor(() =>
+    expect(onBuild).toHaveBeenCalledWith(
+      expect.objectContaining({
+        table: "sales.csv",
+        aggregate: "average",
+        measure: "total",
+      })
+    )
+  )
+  await waitFor(() =>
+    expect(blocksOf(onRunPage.mock.lastCall?.[0])[0].sql).toBe("SELECT built")
+  )
+})
+
+test("a block can go to the AI with a question about it", async () => {
+  const ask = vi.fn<(args: unknown) => unknown>(() => SALES_ANSWER)
+  renderWorkspace(pageBackend({ ask }))
+  await openOverview()
+  await startEditing()
+
+  await userEvent.click(await screen.findByRole("heading", { name: "Totals" }))
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Ask AI to change this" })
+  )
+  expect(await screen.findByText("Changing Totals")).toBeTruthy()
+
+  await askQuestion("Make it a bar chart")
+
+  await waitFor(() => expect(ask).toHaveBeenCalled())
+  expect(ask.mock.calls[0][0]).toMatchObject({
+    request: { activePage: "page-1", activeBlock: "b1" },
+  })
 })
 
 test("deleting a Page asks first and leaves the data", async () => {
   renderWorkspace(pageBackend())
   await openOverview()
-  await screen.findByLabelText("Page title")
 
   await userEvent.click(
     await screen.findByRole("button", { name: "Delete Overview" })

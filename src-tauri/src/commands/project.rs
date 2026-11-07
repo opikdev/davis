@@ -1,8 +1,13 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use davis_core::{LinkedFilter, OpenedTable, QueryResult, QueryTable, TableFilter};
-use davis_project::{Block, BlockKind, Chat, Page, Project, RecentProject};
+use davis_agent::{DraftKind, DraftSource};
+use davis_core::{
+    BuiltQuery, Column, FilterRule, LinkedFilter, OpenedTable, QueryResult, QuerySpec, QueryTable,
+    TableFilter, TableSource,
+};
+use davis_project::{Block, Chat, FilterKind, Page, PageFilter, Project, RecentProject};
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::spawn_blocking;
 use tauri::{AppHandle, Manager};
@@ -234,11 +239,11 @@ pub async fn add_block(
 ) -> Result<Page, AppError> {
     Ok(spawn_blocking(move || {
         davis_project::change_page(Path::new(&project), &id, updated_at, |page| {
-            (block.x, block.y) = davis_project::free_spot(&page.blocks, block.w, block.h);
             if block.id.is_empty() {
-                block.id = format!("b{updated_at}-{}", page.blocks.len());
+                let count: usize = page.rows.iter().map(|row| row.blocks.len()).sum();
+                block.id = format!("b{updated_at}-{count}");
             }
-            page.blocks.push(block);
+            davis_project::place_block(page, block);
         })
     })
     .await??)
@@ -250,6 +255,8 @@ pub struct BlockResult {
     id: String,
     result: Option<QueryResult>,
     error: Option<String>,
+    trend: Option<QueryResult>,
+    sources: BTreeMap<String, QueryResult>,
 }
 
 #[derive(Debug, Serialize)]
@@ -266,63 +273,87 @@ pub struct PageRun {
     filters: Vec<FilterReach>,
 }
 
-fn file_of(tables: &[QueryTable], files: &[String], name: &str) -> Option<String> {
-    let index = tables.iter().position(|table| table.name == name)?;
-    files.get(index).cloned()
+fn rule_of(filter: &PageFilter) -> Option<FilterRule> {
+    match filter.kind {
+        FilterKind::Values if filter.values.is_empty() => None,
+        FilterKind::Values => Some(FilterRule::OneOf(filter.values.clone())),
+        FilterKind::Dates if filter.from.is_none() && filter.to.is_none() => None,
+        FilterKind::Dates => Some(FilterRule::Between {
+            from: filter.from.clone(),
+            to: filter.to.clone(),
+        }),
+    }
 }
 
 // Adds each chosen filter to its own table and to every table linked to it.
 fn apply_filters(page: &Page, tables: &mut [QueryTable], files: &[String]) -> Vec<FilterReach> {
     let chosen: Vec<_> = page
-        .blocks
+        .filters
         .iter()
-        .filter(|block| block.kind == BlockKind::Filter && !block.values.is_empty())
+        .filter_map(|filter| Some((filter, rule_of(filter)?)))
         .collect();
     if chosen.is_empty() {
         return Vec::new();
     }
     let links = davis_core::find_links(tables).unwrap_or_default();
     let mut reach = Vec::new();
-    for block in chosen {
-        let (Some(file), Some(column)) = (&block.table, &block.column) else {
-            continue;
-        };
-        let Some(index) = files.iter().position(|name| name == file) else {
+    for (filter, rule) in chosen {
+        let Some(index) = files.iter().position(|name| *name == filter.table) else {
             continue;
         };
         let (name, source) = (tables[index].name.clone(), tables[index].source.clone());
         tables[index].filters.push(TableFilter {
-            column: column.clone(),
-            values: block.values.clone(),
+            column: filter.column.clone(),
+            rule: rule.clone(),
             through: None,
         });
-        let mut reached = vec![file.clone()];
+        let mut reached = vec![filter.table.clone()];
         for link in links.iter().filter(|link| link.to_table == name) {
-            let linked = file_of(tables, files, &link.from_table);
-            let Some(from) = tables
-                .iter_mut()
-                .find(|table| table.name == link.from_table)
+            let Some(position) = tables
+                .iter()
+                .position(|table| table.name == link.from_table)
             else {
                 continue;
             };
-            from.filters.push(TableFilter {
+            tables[position].filters.push(TableFilter {
                 column: link.from_column.clone(),
-                values: block.values.clone(),
+                rule: rule.clone(),
                 through: Some(LinkedFilter {
                     source: source.clone(),
                     key: link.to_column.clone(),
-                    column: column.clone(),
+                    column: filter.column.clone(),
                 }),
             });
-            reached.extend(linked.filter(|linked| linked != file));
+            if !reached.contains(&files[position]) {
+                reached.push(files[position].clone());
+            }
         }
-        reached.dedup();
         reach.push(FilterReach {
-            id: block.id.clone(),
+            id: filter.id.clone(),
             files: reached,
         });
     }
     reach
+}
+
+fn run_block(tables: &[QueryTable], block: &Block) -> BlockResult {
+    let run = |sql: &str| davis_core::run_query(tables, sql, Arc::default());
+    let (result, error) = match block.sql.as_deref().map(run) {
+        None => (None, None),
+        Some(Ok(result)) => (Some(result), None),
+        Some(Err(failure)) => (None, Some(failure.to_string())),
+    };
+    BlockResult {
+        id: block.id.clone(),
+        result,
+        error,
+        trend: block.trend_sql.as_deref().and_then(|sql| run(sql).ok()),
+        sources: block
+            .sources
+            .iter()
+            .filter_map(|(id, sql)| Some((id.clone(), run(sql).ok()?)))
+            .collect(),
+    }
 }
 
 // Each block runs on its own, so one bad query shows in its block and the rest still load.
@@ -340,23 +371,10 @@ pub async fn run_page(project: String, page: Page) -> Result<PageRun, AppError> 
             .collect();
         let filters = apply_filters(&page, &mut tables, &files);
         let blocks = page
-            .blocks
+            .rows
             .iter()
-            .filter_map(|block| Some((block.id.clone(), block.sql.as_ref()?)))
-            .map(
-                |(id, sql)| match davis_core::run_query(&tables, sql, Arc::default()) {
-                    Ok(result) => BlockResult {
-                        id,
-                        result: Some(result),
-                        error: None,
-                    },
-                    Err(error) => BlockResult {
-                        id,
-                        result: None,
-                        error: Some(error.to_string()),
-                    },
-                },
-            )
+            .flat_map(|row| &row.blocks)
+            .map(|block| run_block(&tables, block))
             .collect();
         Ok(PageRun { blocks, filters })
     })
@@ -365,28 +383,31 @@ pub async fn run_page(project: String, page: Page) -> Result<PageRun, AppError> 
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FilterChoice {
+pub struct ProjectColumns {
     table: String,
-    columns: Vec<String>,
+    columns: Vec<Column>,
 }
 
 #[tauri::command]
-pub async fn filter_choices(project: String) -> Result<Vec<FilterChoice>, AppError> {
+pub async fn project_columns(project: String) -> Result<Vec<ProjectColumns>, AppError> {
     spawn_blocking(move || {
         Ok(project_tables(Path::new(&project))?
             .into_iter()
-            .map(|table| FilterChoice {
-                columns: table
-                    .opened
-                    .columns
-                    .into_iter()
-                    .map(|column| column.name)
-                    .collect(),
+            .map(|table| ProjectColumns {
+                columns: table.opened.columns,
                 table: table.opened.name,
             })
             .collect())
     })
     .await?
+}
+
+fn source_of(project: &str, table: &str) -> Result<TableSource, AppError> {
+    Ok(project_tables(Path::new(project))?
+        .into_iter()
+        .find(|candidate| candidate.opened.name == table)
+        .map(|candidate| candidate.opened.source)
+        .ok_or(davis_project::Error::MissingItem)?)
 }
 
 #[tauri::command]
@@ -396,12 +417,68 @@ pub async fn filter_options(
     column: String,
 ) -> Result<Vec<String>, AppError> {
     spawn_blocking(move || {
-        let source = project_tables(Path::new(&project))?
+        Ok(davis_core::column_options(
+            &source_of(&project, &table)?,
+            &column,
+        )?)
+    })
+    .await?
+}
+
+#[tauri::command]
+pub async fn filter_bounds(
+    project: String,
+    table: String,
+    column: String,
+) -> Result<Option<(String, String)>, AppError> {
+    spawn_blocking(move || {
+        Ok(davis_core::column_bounds(
+            &source_of(&project, &table)?,
+            &column,
+        )?)
+    })
+    .await?
+}
+
+#[tauri::command]
+pub async fn build_block_query(project: String, spec: QuerySpec) -> Result<BuiltQuery, AppError> {
+    spawn_blocking(move || {
+        let table = project_tables(Path::new(&project))?
             .into_iter()
-            .find(|candidate| candidate.opened.name == table)
-            .map(|candidate| candidate.opened.source)
+            .find(|candidate| candidate.opened.name == spec.table)
             .ok_or(davis_project::Error::MissingItem)?;
-        Ok(davis_core::column_options(&source, &column)?)
+        Ok(davis_core::build_query(&spec, &table.name))
+    })
+    .await?
+}
+
+#[tauri::command]
+pub async fn draft_page(
+    project: String,
+    id: String,
+    kind: DraftKind,
+    updated_at: u64,
+) -> Result<Page, AppError> {
+    spawn_blocking(move || {
+        let folder = Path::new(&project);
+        let tables = project_tables(folder)?;
+        let sources: Vec<DraftSource> = tables
+            .iter()
+            .filter_map(|table| {
+                Some(DraftSource {
+                    table,
+                    profile: davis_core::profile_table(&table.opened.source).ok()?,
+                })
+            })
+            .collect();
+        Ok(davis_project::change_page(
+            folder,
+            &id,
+            updated_at,
+            |page| {
+                davis_agent::draft_page(page, kind, &sources, &format!("b{updated_at}"));
+            },
+        )?)
     })
     .await?
 }

@@ -1,6 +1,7 @@
 import {
   ArrowDown02Icon,
   ArrowUp02Icon,
+  Cancel01Icon,
   Copy01Icon,
   PencilEdit02Icon,
   RepeatIcon,
@@ -207,6 +208,8 @@ function EmptyChat({ table, pageTitle, profile, onAsk }: EmptyChatProps) {
 type ChatPanelProps = {
   table?: OpenedTable
   pageTitle?: string
+  blockTitle?: string
+  onClearBlock?: () => void
   profile?: ColumnProfile[]
   figureAction?: FigureAction
   chat: ReturnType<typeof useChat>
@@ -215,6 +218,8 @@ type ChatPanelProps = {
 export function ChatPanel({
   table,
   pageTitle,
+  blockTitle,
+  onClearBlock,
   profile,
   figureAction,
   chat,
@@ -323,6 +328,22 @@ export function ChatPanel({
         )}
       </div>
       <div className="shrink-0 p-2 pt-0">
+        {blockTitle && (
+          <Button
+            variant="secondary"
+            size="sm"
+            aria-label={`Stop asking about ${blockTitle}`}
+            className="mb-1.5 h-6 max-w-full gap-1 px-2 font-normal"
+            onClick={onClearBlock}
+          >
+            <span className="truncate">Changing {blockTitle}</span>
+            <HugeiconsIcon
+              icon={Cancel01Icon}
+              strokeWidth={1.5}
+              className="size-3"
+            />
+          </Button>
+        )}
         {asked && (
           <div className="mb-1.5 flex animate-fade flex-col gap-1.5 rounded-xl border bg-sidebar p-2.5">
             <p className="select-text">{asked.label}</p>

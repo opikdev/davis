@@ -59,6 +59,12 @@ A CLI's sandbox is not enough on its own. Codex's `read-only` sandbox only block
 
 A Page block stores its query, not its numbers, so opening a Page always shows the current data.
 
+A Page is a list of rows, and each row holds up to four blocks that share its width. Rows replaced a free grid because they can't overlap, leave gaps, or break when the panel changes width. Pages saved in the old grid format are converted when read.
+
+A block built from choices keeps those choices in `spec`, and `crates/core/src/builder.rs` turns them into SQL, so nobody needs the AI or SQL to make a chart. Blocks the AI wrote have no `spec`, so the settings panel never replaces their SQL unless the person asks. Starting points in `crates/agent/src/drafts.rs` draft a Page from each file's profile without using AI.
+
+A Page opens in View, where clicking a chart adds a temporary filter that isn't saved. Changes happen in Edit, which has undo. Asking the AI about a block sends its id with the question, and the AI changes that block in place.
+
 Filters narrow the tables themselves, not a block's result, because filtering an aggregate afterwards gives wrong numbers. A filter also follows links found by `find_links`, so a filter on `customers` reaches a total worked out from `orders` alone. Each filter shows which files it reached, because a block that a filter can't reach keeps showing unfiltered numbers.
 
 ## AI setup

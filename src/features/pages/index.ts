@@ -1,3 +1,5 @@
+export { BlockSettings } from "@/features/pages/block-settings"
+export { findBlock } from "@/features/pages/layout"
 export { PageView } from "@/features/pages/page-view"
 export { PinMenu } from "@/features/pages/pin-menu"
 export { usePage } from "@/features/pages/use-page"

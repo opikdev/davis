@@ -116,7 +116,8 @@ export function useChat(
   table: OpenedTable | undefined,
   onSaved: (project: string) => void,
   activePage?: string,
-  onPageChanged?: () => void
+  onPageChanged?: () => void,
+  activeBlock?: string
 ) {
   const [turns, setTurns] = useState<Turn[]>([])
   const [chatId, setChatId] = useState<string>()
@@ -192,6 +193,7 @@ export function useChat(
             question,
             activeTable: table?.name ?? null,
             activePage: activePage ?? null,
+            activeBlock: activeBlock ?? null,
             history,
           },
           (step) => {
@@ -223,7 +225,7 @@ export function useChat(
         }))
       }
     },
-    [activePage, buffer, project, table?.name, update]
+    [activeBlock, activePage, buffer, project, table?.name, update]
   )
 
   const ask = useCallback(

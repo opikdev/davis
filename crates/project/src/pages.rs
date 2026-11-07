@@ -1,15 +1,18 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::storage::write_json;
 use crate::{Error, Result};
 
 pub(crate) const PAGES_FOLDER: &str = "pages";
-const GRID_COLUMNS: u32 = 12;
+const MAX_BLOCKS_IN_ROW: usize = 4;
+const CHARTS_IN_ROW: usize = 2;
 
 static UPDATES: Mutex<()> = Mutex::new(());
 
@@ -18,27 +21,28 @@ static UPDATES: Mutex<()> = Mutex::new(());
 pub enum BlockKind {
     Figure,
     Text,
-    Filter,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Block {
     pub id: String,
     pub kind: BlockKind,
-    pub x: u32,
-    pub y: u32,
-    pub w: u32,
-    pub h: u32,
     pub title: String,
+    pub weight: u32,
     pub sql: Option<String>,
+    pub trend_sql: Option<String>,
+    pub spec: Option<Value>,
     pub view: Option<String>,
     pub x_column: Option<String>,
     pub y_column: Option<String>,
+    pub series_column: Option<String>,
+    pub format: Option<String>,
+    pub show_labels: bool,
+    pub sort: Option<String>,
+    pub limit: Option<u32>,
     pub text: Option<String>,
-    pub table: Option<String>,
-    pub column: Option<String>,
-    pub values: Vec<String>,
+    pub sources: BTreeMap<String, String>,
 }
 
 impl Default for Block {
@@ -46,30 +50,147 @@ impl Default for Block {
         Self {
             id: String::new(),
             kind: BlockKind::Text,
-            x: 0,
-            y: 0,
-            w: 6,
-            h: 4,
             title: String::new(),
+            weight: 1,
             sql: None,
+            trend_sql: None,
+            spec: None,
             view: None,
             x_column: None,
             y_column: None,
+            series_column: None,
+            format: None,
+            show_labels: true,
+            sort: None,
+            limit: None,
             text: None,
-            table: None,
-            column: None,
-            values: Vec::new(),
+            sources: BTreeMap::new(),
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PageRow {
+    pub id: String,
+    pub blocks: Vec<Block>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FilterKind {
+    #[default]
+    Values,
+    Dates,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct PageFilter {
+    pub id: String,
+    pub table: String,
+    pub column: String,
+    pub kind: FilterKind,
+    pub values: Vec<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", from = "StoredPage")]
 pub struct Page {
     pub id: String,
     pub title: String,
     pub updated_at: u64,
-    pub blocks: Vec<Block>,
+    pub rows: Vec<PageRow>,
+    pub filters: Vec<PageFilter>,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct GridBlock {
+    id: String,
+    kind: String,
+    x: u32,
+    y: u32,
+    title: String,
+    sql: Option<String>,
+    view: Option<String>,
+    x_column: Option<String>,
+    y_column: Option<String>,
+    text: Option<String>,
+    table: Option<String>,
+    column: Option<String>,
+    values: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredPage {
+    id: String,
+    title: String,
+    updated_at: u64,
+    #[serde(default)]
+    rows: Vec<PageRow>,
+    #[serde(default)]
+    filters: Vec<PageFilter>,
+    #[serde(default)]
+    blocks: Vec<GridBlock>,
+}
+
+// Pages saved on the free grid become rows, top to bottom and left to right.
+impl From<StoredPage> for Page {
+    fn from(stored: StoredPage) -> Self {
+        let mut page = Self {
+            id: stored.id,
+            title: stored.title,
+            updated_at: stored.updated_at,
+            rows: stored.rows,
+            filters: stored.filters,
+        };
+        let mut grid = stored.blocks;
+        grid.sort_by_key(|block| (block.y, block.x));
+        let mut last_y = None;
+        for block in grid {
+            if block.kind == "filter" {
+                page.filters.push(PageFilter {
+                    id: block.id,
+                    table: block.table.unwrap_or_default(),
+                    column: block.column.unwrap_or_default(),
+                    values: block.values,
+                    ..PageFilter::default()
+                });
+                continue;
+            }
+            let y = block.y;
+            let converted = Block {
+                id: block.id.clone(),
+                kind: if block.kind == "text" {
+                    BlockKind::Text
+                } else {
+                    BlockKind::Figure
+                },
+                title: block.title,
+                sql: block.sql,
+                view: block.view,
+                x_column: block.x_column,
+                y_column: block.y_column,
+                text: block.text,
+                ..Block::default()
+            };
+            match page.rows.last_mut() {
+                Some(row) if last_y == Some(y) && row.blocks.len() < MAX_BLOCKS_IN_ROW => {
+                    row.blocks.push(converted);
+                }
+                _ => page.rows.push(PageRow {
+                    id: format!("row-{}", block.id),
+                    blocks: vec![converted],
+                }),
+            }
+            last_y = Some(y);
+        }
+        page
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -78,6 +199,54 @@ pub struct PageSummary {
     pub id: String,
     pub title: String,
     pub updated_at: u64,
+}
+
+fn is_number(block: &Block) -> bool {
+    block.view.as_deref() == Some("number")
+}
+
+fn is_chart(block: &Block) -> bool {
+    matches!(
+        block.view.as_deref(),
+        Some("bar" | "line" | "area" | "stacked" | "scatter")
+    )
+}
+
+// Numbers sit together, charts go in pairs, and tables and notes take a whole row.
+pub fn place_block(page: &mut Page, block: Block) {
+    let fits = page.rows.last().is_some_and(|row| {
+        if is_number(&block) {
+            row.blocks.len() < MAX_BLOCKS_IN_ROW && row.blocks.iter().all(is_number)
+        } else if is_chart(&block) {
+            row.blocks.len() < CHARTS_IN_ROW && row.blocks.iter().all(is_chart)
+        } else {
+            false
+        }
+    });
+    match page.rows.last_mut() {
+        Some(row) if fits => row.blocks.push(block),
+        _ => page.rows.push(PageRow {
+            id: format!("row-{}", block.id),
+            blocks: vec![block],
+        }),
+    }
+}
+
+pub fn remove_block(page: &mut Page, id: &str) -> bool {
+    let before: usize = page.rows.iter().map(|row| row.blocks.len()).sum();
+    for row in &mut page.rows {
+        row.blocks.retain(|block| block.id != id);
+    }
+    page.rows.retain(|row| !row.blocks.is_empty());
+    let after: usize = page.rows.iter().map(|row| row.blocks.len()).sum();
+    after < before
+}
+
+pub fn find_block<'a>(page: &'a mut Page, id: &str) -> Option<&'a mut Block> {
+    page.rows
+        .iter_mut()
+        .flat_map(|row| row.blocks.iter_mut())
+        .find(|block| block.id == id)
 }
 
 fn page_path(project: &Path, id: &str) -> Result<PathBuf> {
@@ -132,28 +301,6 @@ pub fn change_page(
     Ok(page)
 }
 
-fn overlaps(block: &Block, x: u32, y: u32, w: u32, h: u32) -> bool {
-    x < block.x + block.w && block.x < x + w && y < block.y + block.h && block.y < y + h
-}
-
-// The first free spot, reading left to right and then down.
-pub fn free_spot(blocks: &[Block], w: u32, h: u32) -> (u32, u32) {
-    let w = w.min(GRID_COLUMNS);
-    let bottom = blocks
-        .iter()
-        .map(|block| block.y + block.h)
-        .max()
-        .unwrap_or(0);
-    for y in 0..=bottom {
-        for x in 0..=(GRID_COLUMNS - w) {
-            if !blocks.iter().any(|block| overlaps(block, x, y, w, h)) {
-                return (x, y);
-            }
-        }
-    }
-    (0, bottom)
-}
-
 // One unreadable page must not stop the project opening, so it's left out of the list.
 pub(crate) fn list_pages(project: &Path) -> Result<Vec<PageSummary>> {
     let entries = match fs::read_dir(project.join(PAGES_FOLDER)) {
@@ -184,17 +331,18 @@ pub(crate) fn list_pages(project: &Path) -> Result<Vec<PageSummary>> {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
     use crate::create_project;
     use crate::project::tests::Folder;
     use crate::read_project;
 
-    fn block(x: u32, y: u32, w: u32, h: u32) -> Block {
+    fn figure(id: &str, view: &str) -> Block {
         Block {
-            x,
-            y,
-            w,
-            h,
+            id: id.to_owned(),
+            kind: BlockKind::Figure,
+            view: Some(view.to_owned()),
             ..Block::default()
         }
     }
@@ -204,7 +352,8 @@ mod tests {
             id: id.to_owned(),
             title: format!("Page {id}"),
             updated_at,
-            blocks: vec![block(0, 0, 6, 4)],
+            rows: Vec::new(),
+            filters: Vec::new(),
         }
     }
 
@@ -212,14 +361,106 @@ mod tests {
         PathBuf::from(create_project(folder.path(), "Sales").unwrap().path)
     }
 
+    fn shape(page: &Page) -> Vec<Vec<&str>> {
+        page.rows
+            .iter()
+            .map(|row| row.blocks.iter().map(|block| block.id.as_str()).collect())
+            .collect()
+    }
+
     #[test]
     fn a_saved_page_comes_back_the_same() {
         let folder = Folder::new("page");
         let project = project_in(&folder);
+        let mut saved = page("a-1", 5);
+        place_block(&mut saved, figure("b1", "bar"));
+        saved.filters.push(PageFilter {
+            id: "f1".to_owned(),
+            kind: FilterKind::Dates,
+            from: Some("2026-01-01".to_owned()),
+            ..PageFilter::default()
+        });
 
-        save_page(&project, &page("a-1", 5)).unwrap();
+        save_page(&project, &saved).unwrap();
 
-        assert_eq!(read_page(&project, "a-1").unwrap(), page("a-1", 5));
+        assert_eq!(read_page(&project, "a-1").unwrap(), saved);
+    }
+
+    #[test]
+    fn a_page_from_the_free_grid_becomes_rows() {
+        let folder = Folder::new("grid");
+        let project = project_in(&folder);
+        let old = json!({
+            "id": "old", "title": "Old", "updatedAt": 1,
+            "blocks": [
+                { "id": "c", "kind": "figure", "x": 0, "y": 9, "w": 12, "h": 8, "title": "Below", "sql": "SELECT 3" },
+                { "id": "b", "kind": "figure", "x": 6, "y": 0, "w": 6, "h": 8, "title": "Right", "sql": "SELECT 2", "view": "bar", "xColumn": "a", "yColumn": "b" },
+                { "id": "a", "kind": "figure", "x": 0, "y": 0, "w": 6, "h": 8, "title": "Left", "sql": "SELECT 1" },
+                { "id": "n", "kind": "text", "x": 0, "y": 20, "w": 6, "h": 3, "text": "Hello" },
+                { "id": "f", "kind": "filter", "x": 9, "y": 0, "w": 3, "h": 3, "table": "customers.csv", "column": "region", "values": ["EMEA"] },
+            ],
+        });
+        fs::write(project.join("pages").join("old.json"), old.to_string()).unwrap();
+
+        let converted = read_page(&project, "old").unwrap();
+
+        assert_eq!(shape(&converted), [vec!["a", "b"], vec!["c"], vec!["n"]]);
+        assert_eq!(converted.rows[0].blocks[1].sql.as_deref(), Some("SELECT 2"));
+        assert_eq!(converted.rows[0].blocks[1].x_column.as_deref(), Some("a"));
+        assert_eq!(converted.rows[2].blocks[0].kind, BlockKind::Text);
+        assert_eq!(converted.filters.len(), 1);
+        assert_eq!(converted.filters[0].column, "region");
+        assert_eq!(converted.filters[0].values, ["EMEA"]);
+    }
+
+    #[test]
+    fn numbers_sit_together_charts_pair_up_and_tables_get_a_row() {
+        let mut built = page("p", 1);
+        for (id, view) in [
+            ("n1", "number"),
+            ("n2", "number"),
+            ("c1", "bar"),
+            ("c2", "line"),
+            ("c3", "bar"),
+            ("t1", "table"),
+            ("c4", "bar"),
+        ] {
+            place_block(&mut built, figure(id, view));
+        }
+
+        assert_eq!(
+            shape(&built),
+            [
+                vec!["n1", "n2"],
+                vec!["c1", "c2"],
+                vec!["c3"],
+                vec!["t1"],
+                vec!["c4"]
+            ]
+        );
+    }
+
+    #[test]
+    fn a_row_holds_at_most_four_numbers() {
+        let mut built = page("p", 1);
+        for id in ["1", "2", "3", "4", "5"] {
+            place_block(&mut built, figure(id, "number"));
+        }
+
+        assert_eq!(built.rows[0].blocks.len(), 4);
+        assert_eq!(built.rows.len(), 2);
+    }
+
+    #[test]
+    fn removing_the_last_block_in_a_row_removes_the_row() {
+        let mut built = page("p", 1);
+        place_block(&mut built, figure("t1", "table"));
+        place_block(&mut built, figure("t2", "table"));
+
+        assert!(remove_block(&mut built, "t1"));
+        assert!(!remove_block(&mut built, "nope"));
+
+        assert_eq!(shape(&built), [vec!["t2"]]);
     }
 
     #[test]
@@ -246,11 +487,14 @@ mod tests {
         let project = project_in(&folder);
         save_page(&project, &page("a", 1)).unwrap();
 
-        change_page(&project, "a", 2, |page| page.blocks.push(block(6, 0, 6, 4))).unwrap();
+        change_page(&project, "a", 2, |page| {
+            place_block(page, figure("b", "table"))
+        })
+        .unwrap();
         let changed =
             change_page(&project, "a", 3, |page| page.title = "Sales".to_owned()).unwrap();
 
-        assert_eq!(changed.blocks.len(), 2);
+        assert_eq!(changed.rows.len(), 1);
         assert_eq!(changed.title, "Sales");
         assert_eq!(read_page(&project, "a").unwrap().updated_at, 3);
     }
@@ -268,21 +512,5 @@ mod tests {
             );
         }
         assert!(project.join("project.json").exists());
-    }
-
-    #[test]
-    fn a_new_block_takes_the_first_free_spot() {
-        assert_eq!(free_spot(&[], 6, 8), (0, 0));
-        assert_eq!(free_spot(&[block(0, 0, 6, 8)], 6, 8), (6, 0));
-        assert_eq!(
-            free_spot(&[block(0, 0, 6, 8), block(6, 0, 6, 8)], 6, 8),
-            (0, 8)
-        );
-        assert_eq!(free_spot(&[block(0, 0, 12, 2)], 3, 2), (0, 2));
-    }
-
-    #[test]
-    fn a_block_wider_than_the_grid_still_fits() {
-        assert_eq!(free_spot(&[], 20, 2), (0, 0));
     }
 }

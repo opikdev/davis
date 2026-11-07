@@ -52,7 +52,13 @@ import {
   type OpenedTable,
 } from "@/features/data"
 import { Home, useFileDrop } from "@/features/home"
-import { PageView, PinMenu, usePage } from "@/features/pages"
+import {
+  BlockSettings,
+  findBlock,
+  PageView,
+  PinMenu,
+  usePage,
+} from "@/features/pages"
 import {
   addProjectFile,
   checkDataFile,
@@ -158,6 +164,7 @@ type CurrentViewProps = {
   files: ReturnType<typeof useOpenTable>
   project?: string
   pages: ReturnType<typeof usePage>
+  hasData: boolean
   isAsking: boolean
   onNewPage: () => void
   projectName?: string
@@ -171,6 +178,7 @@ function CurrentView({
   files,
   project,
   pages,
+  hasData,
   isAsking,
   onNewPage,
   projectName,
@@ -199,7 +207,12 @@ function CurrentView({
       )
     case "page":
       return project && pages.page ? (
-        <PageView project={project} pages={pages} isLocked={isAsking} />
+        <PageView
+          project={project}
+          pages={pages}
+          hasData={hasData}
+          isLocked={isAsking}
+        />
       ) : (
         <EmptyView
           icon={DashboardSquare01Icon}
@@ -267,19 +280,28 @@ export function Workspace() {
     reloadRef.current = reloadPage
   }, [reloadPage])
   const onPageChanged = useCallback(() => void reloadRef.current(), [])
+  const [askedBlockId, setAskedBlockId] = useState<string>()
+  const pageRows = view === "page" ? pages.page?.rows : undefined
+  const askedBlock = pageRows && findBlock(pageRows, askedBlockId)
   const chat = useChat(
     project?.path,
     files.table,
     onChatSaved,
     view === "page" ? pages.page?.id : undefined,
-    onPageChanged
+    onPageChanged,
+    askedBlock?.id
   )
   const chatPanel = useRef<PanelImperativeHandle>(null)
   const chatContent = useRef<HTMLDivElement>(null)
   const chatWidth = useRef(CHAT_WIDTH)
   const showsTable = view === "data" && Boolean(files.table)
   const showsPage = view === "page" && Boolean(pages.page)
-  const showsChat = (showsTable || showsPage) && isChatOpen
+  const settingsBlock =
+    pages.isEditing && pageRows
+      ? findBlock(pageRows, pages.selectedId)
+      : undefined
+  const showsChat =
+    (showsTable || showsPage) && (isChatOpen || Boolean(settingsBlock))
   const [keepsChat, setKeepsChat] = useState(false)
   if (showsChat && !keepsChat) setKeepsChat(true)
 
@@ -309,7 +331,6 @@ export function Workspace() {
           view: figure.view,
           xColumn: figure.x,
           yColumn: figure.y,
-          ...(figure.view === "number" ? { w: 3, h: 4 } : { w: 6, h: 8 }),
         })
       }
       return <PinMenu pages={pageList ?? []} onPin={(id) => void pin(id)} />
@@ -516,6 +537,7 @@ export function Workspace() {
                   files={files}
                   project={project?.path}
                   pages={pages}
+                  hasData={Boolean(project?.files.length)}
                   isAsking={chat.isAsking}
                   onNewPage={() => void newPage()}
                   projectName={project?.name}
@@ -582,14 +604,34 @@ export function Workspace() {
                 !showsChat && "opacity-0"
               )}
             >
-              {keepsChat && (files.table || showsPage) && (
-                <ChatPanel
-                  table={files.table}
-                  pageTitle={showsPage ? pages.page?.title : undefined}
-                  profile={profile}
-                  chat={chat}
-                  figureAction={figureAction}
+              {settingsBlock && project && (
+                <BlockSettings
+                  key={settingsBlock.id}
+                  project={project.path}
+                  block={settingsBlock}
+                  onChange={(change, shouldRun) =>
+                    pages.updateBlock(settingsBlock.id, change, shouldRun)
+                  }
+                  onClose={() => pages.select(undefined)}
+                  onAskAi={() => {
+                    setAskedBlockId(settingsBlock.id)
+                    setIsChatOpen(true)
+                    pages.select(undefined)
+                  }}
                 />
+              )}
+              {keepsChat && (files.table || showsPage) && (
+                <div className={cn("h-full", settingsBlock && "hidden")}>
+                  <ChatPanel
+                    table={files.table}
+                    pageTitle={showsPage ? pages.page?.title : undefined}
+                    blockTitle={askedBlock && (askedBlock.title || "this text")}
+                    onClearBlock={() => setAskedBlockId(undefined)}
+                    profile={profile}
+                    chat={chat}
+                    figureAction={figureAction}
+                  />
+                </div>
               )}
             </div>
           </ResizablePanel>

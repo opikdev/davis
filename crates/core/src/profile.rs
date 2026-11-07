@@ -177,6 +177,20 @@ pub fn column_options(source: &TableSource, column: &str) -> Result<Vec<String>>
     Ok(options)
 }
 
+pub fn column_bounds(source: &TableSource, column: &str) -> Result<Option<(String, String)>> {
+    let connection = connect()?;
+    let name = identifier(column);
+    let bounds: (Option<String>, Option<String>) = connection.query_row(
+        &format!(
+            "SELECT min({name})::VARCHAR, max({name})::VARCHAR FROM {}",
+            scan(source, false)
+        ),
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    Ok(bounds.0.zip(bounds.1))
+}
+
 fn normalized(name: &str) -> String {
     name.to_lowercase().replace(['_', ' ', '-'], "")
 }

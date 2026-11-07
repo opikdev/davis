@@ -9,7 +9,8 @@ mod workbook;
 pub use chats::{Chat, ChatSummary, delete_chat, read_chat, save_chat};
 pub use error::{Error, Result};
 pub use pages::{
-    Block, BlockKind, Page, PageSummary, change_page, delete_page, free_spot, read_page, save_page,
+    Block, BlockKind, FilterKind, Page, PageFilter, PageRow, PageSummary, change_page, delete_page,
+    find_block, place_block, read_page, remove_block, save_page,
 };
 pub use project::{
     Project, ProjectFile, add_file, create_project, data_files_in, new_file_path, read_project,

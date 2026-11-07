@@ -14,6 +14,53 @@ const MAX_RESULT_ROWS: usize = 1_000;
 const QUERY_TIME_LIMIT: Duration = Duration::from_secs(60);
 const STOP_CHECK: Duration = Duration::from_millis(50);
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FilterRule {
+    OneOf(Vec<String>),
+    Between {
+        from: Option<String>,
+        to: Option<String>,
+    },
+}
+
+impl FilterRule {
+    fn is_active(&self) -> bool {
+        match self {
+            Self::OneOf(values) => !values.is_empty(),
+            Self::Between { from, to } => from.is_some() || to.is_some(),
+        }
+    }
+
+    // Comparing the leading characters lets "2026-03" match any day in that month.
+    fn condition(&self, column: &str) -> String {
+        let text = format!("{column}::VARCHAR");
+        match self {
+            Self::OneOf(values) => {
+                let values = values
+                    .iter()
+                    .map(|value| quoted(value))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{text} IN ({values})")
+            }
+            Self::Between { from, to } => {
+                let bound = |value: &str, comparison: &str| {
+                    format!(
+                        "left({text}, {}) {comparison} {}",
+                        value.chars().count(),
+                        quoted(value)
+                    )
+                };
+                from.iter()
+                    .map(|value| bound(value, ">="))
+                    .chain(to.iter().map(|value| bound(value, "<=")))
+                    .collect::<Vec<_>>()
+                    .join(" AND ")
+            }
+        }
+    }
+}
+
 // A filter on one table also narrows the tables that link to it, so
 // "region = EMEA" on customers reaches a total worked out from orders alone.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,7 +73,7 @@ pub struct LinkedFilter {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TableFilter {
     pub column: String,
-    pub values: Vec<String>,
+    pub rule: FilterRule,
     pub through: Option<LinkedFilter>,
 }
 
@@ -55,22 +102,16 @@ fn quoted_name(name: &str) -> String {
 fn filter_clause(filters: &[TableFilter]) -> String {
     let conditions: Vec<String> = filters
         .iter()
-        .filter(|filter| !filter.values.is_empty())
+        .filter(|filter| filter.rule.is_active())
         .map(|filter| {
-            let values = filter
-                .values
-                .iter()
-                .map(|value| quoted(value))
-                .collect::<Vec<_>>()
-                .join(", ");
             let column = quoted_name(&filter.column);
             match &filter.through {
-                None => format!("{column}::VARCHAR IN ({values})"),
+                None => filter.rule.condition(&column),
                 Some(link) => format!(
-                    "{column}::VARCHAR IN (SELECT {}::VARCHAR FROM {} WHERE {}::VARCHAR IN ({values}))",
+                    "{column}::VARCHAR IN (SELECT {}::VARCHAR FROM {} WHERE {})",
                     quoted_name(&link.key),
                     scan(&link.source, false),
-                    quoted_name(&link.column),
+                    filter.rule.condition(&quoted_name(&link.column)),
                 ),
             }
         })
@@ -525,7 +566,7 @@ mod tests {
         );
         sales.filters = vec![TableFilter {
             column: "region".to_owned(),
-            values: vec!["EMEA".to_owned()],
+            rule: FilterRule::OneOf(vec!["EMEA".to_owned()]),
             through: None,
         }];
 
@@ -545,7 +586,7 @@ mod tests {
         let mut customers = table(&folder, "customers", "id,region\n1,EMEA\n2,APAC\n");
         customers.filters = vec![TableFilter {
             column: "region".to_owned(),
-            values: vec!["APAC".to_owned()],
+            rule: FilterRule::OneOf(vec!["APAC".to_owned()]),
             through: None,
         }];
         let orders = table(&folder, "orders", "customer,amount\n1,10\n2,20\n2,5\n");
@@ -567,7 +608,7 @@ mod tests {
         let mut orders = table(&folder, "orders", "customer,amount\n1,10\n2,20\n3,5\n");
         orders.filters = vec![TableFilter {
             column: "customer".to_owned(),
-            values: vec!["EMEA".to_owned()],
+            rule: FilterRule::OneOf(vec!["EMEA".to_owned()]),
             through: Some(LinkedFilter {
                 source: customers.source.clone(),
                 key: "id".to_owned(),
@@ -586,12 +627,71 @@ mod tests {
     }
 
     #[test]
+    fn a_date_range_keeps_the_days_at_both_ends() {
+        let folder = Folder::new("filter-dates");
+        let mut sales = table(
+            &folder,
+            "sales",
+            "day,amount\n2026-01-31,1\n2026-02-01,2\n2026-02-28,4\n2026-03-01,8\n",
+        );
+        sales.filters = vec![TableFilter {
+            column: "day".to_owned(),
+            rule: FilterRule::Between {
+                from: Some("2026-02-01".to_owned()),
+                to: Some("2026-02-28".to_owned()),
+            },
+            through: None,
+        }];
+
+        let result = run_query(
+            &[sales],
+            "SELECT sum(amount) FROM sales",
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert_eq!(result.rows, [[Some("6".to_owned())]]);
+    }
+
+    #[test]
+    fn a_range_can_be_open_at_one_end_or_be_a_month() {
+        let folder = Folder::new("filter-open");
+        let source = table(
+            &folder,
+            "sales",
+            "month,amount\n2026-01,1\n2026-02,2\n2026-03,4\n",
+        );
+        let total = |from: Option<&str>, to: Option<&str>| {
+            let mut sales = source.clone();
+            sales.filters = vec![TableFilter {
+                column: "month".to_owned(),
+                rule: FilterRule::Between {
+                    from: from.map(str::to_owned),
+                    to: to.map(str::to_owned),
+                },
+                through: None,
+            }];
+            run_query(
+                &[sales],
+                "SELECT sum(amount) FROM sales",
+                Arc::new(AtomicBool::new(false)),
+            )
+            .unwrap()
+            .rows
+        };
+
+        assert_eq!(total(Some("2026-02"), None), [[Some("6".to_owned())]]);
+        assert_eq!(total(None, Some("2026-02")), [[Some("3".to_owned())]]);
+        assert_eq!(total(None, None), [[Some("7".to_owned())]]);
+    }
+
+    #[test]
     fn a_filter_with_nothing_chosen_keeps_every_row() {
         let folder = Folder::new("filter-none");
         let mut sales = table(&folder, "sales", "region\nEMEA\nAPAC\n");
         sales.filters = vec![TableFilter {
             column: "region".to_owned(),
-            values: Vec::new(),
+            rule: FilterRule::OneOf(Vec::new()),
             through: None,
         }];
 
@@ -610,7 +710,10 @@ mod tests {
         let mut sales = table(&folder, "sales", "region\nO'Brien\nAPAC\n");
         sales.filters = vec![TableFilter {
             column: "region".to_owned(),
-            values: vec!["O'Brien".to_owned(), "x'); DROP VIEW sales; --".to_owned()],
+            rule: FilterRule::OneOf(vec![
+                "O'Brien".to_owned(),
+                "x'); DROP VIEW sales; --".to_owned(),
+            ]),
             through: None,
         }];
 

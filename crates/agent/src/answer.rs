@@ -34,6 +34,8 @@ pub struct AgentRequest {
     pub active_table: Option<String>,
     #[serde(default)]
     pub active_page: Option<String>,
+    #[serde(default)]
+    pub active_block: Option<String>,
     pub history: Vec<PastTurn>,
 }
 
@@ -291,6 +293,7 @@ mod tests {
             question: "Why?".to_owned(),
             active_table: Some("sales.csv".to_owned()),
             active_page: None,
+            active_block: None,
             history: vec![PastTurn {
                 question: "Total?".to_owned(),
                 answer: "It was 10.".to_owned(),

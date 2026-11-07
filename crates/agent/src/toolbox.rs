@@ -1,12 +1,14 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use davis_ai::{ToolDefinition, ToolReply, Toolbox};
 use davis_core::{QueryResult, QueryTable, Row, run_query};
-use davis_project::{Block, BlockKind, Page, free_spot};
+use davis_project::{
+    Block, BlockKind, FilterKind, Page, PageFilter, find_block, place_block, remove_block,
+};
 use serde_json::{Value, json};
 
 use crate::answer::{Figure, FigureView, StoredQuery};
@@ -17,17 +19,10 @@ use crate::steps::{AskStep, SendStep, StepKind, StepStatus};
 pub(crate) const MAX_QUERIES: usize = 10;
 const MAX_ROWS_SENT: usize = 50;
 const MAX_CELL_CHARACTERS: usize = 200;
-const CHART_SIZE: (u32, u32) = (6, 8);
-const NUMBER_SIZE: (u32, u32) = (3, 4);
-const TEXT_SIZE: (u32, u32) = (6, 3);
-
-fn block_size(view: &str) -> Option<(u32, u32)> {
-    match view {
-        "bar" | "line" | "table" => Some(CHART_SIZE),
-        "number" => Some(NUMBER_SIZE),
-        _ => None,
-    }
-}
+const CHART_VIEWS: [&str; 5] = ["bar", "line", "area", "stacked", "scatter"];
+const PAGE_VIEWS: [&str; 7] = [
+    "bar", "line", "area", "stacked", "scatter", "number", "table",
+];
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -35,9 +30,24 @@ fn now_ms() -> u64 {
         .map_or(0, |elapsed| elapsed.as_millis() as u64)
 }
 
-fn unique_block_id(page: &Page, base: &str) -> String {
-    let number = page.blocks.len();
-    format!("{base}-{number}")
+static NEXT_BLOCK: AtomicU64 = AtomicU64::new(0);
+
+fn new_block_id() -> String {
+    let number = NEXT_BLOCK.fetch_add(1, Ordering::Relaxed);
+    format!("b{}-{number}", now_ms())
+}
+
+// Text references look like {{q1.0.total}}, so a note can keep its numbers live.
+fn referenced_queries(text: &str) -> Vec<String> {
+    let mut queries: Vec<String> = Vec::new();
+    for part in text.split("{{").skip(1) {
+        if let Some((id, _)) = part.split_once('.')
+            && !queries.iter().any(|known| known == id)
+        {
+            queries.push(id.to_owned());
+        }
+    }
+    queries
 }
 
 #[derive(Default)]
@@ -264,6 +274,35 @@ impl DataTools<'_> {
         }
     }
 
+    fn sql_of(&self, query_id: &str) -> Option<String> {
+        let findings = self.findings();
+        let query = findings.queries.get(query_id)?;
+        Some(query.page_sql.clone().unwrap_or_else(|| query.sql.clone()))
+    }
+
+    fn check_columns(&self, query_id: &str, view: &str, input: &Value) -> Result<(), String> {
+        let findings = self.findings();
+        let Some(query) = findings.queries.get(query_id) else {
+            return Err(format!("There is no query {query_id}."));
+        };
+        let has_column = |key: &str| {
+            input[key].as_str().is_some_and(|name| {
+                query
+                    .result
+                    .columns
+                    .iter()
+                    .any(|column| column.name == name)
+            })
+        };
+        if CHART_VIEWS.contains(&view) && !(has_column("x") && has_column("y")) {
+            return Err("A chart needs x and y set to columns of that query.".to_owned());
+        }
+        if view == "stacked" && !has_column("series") {
+            return Err("A stacked chart needs series set to a column of that query.".to_owned());
+        }
+        Ok(())
+    }
+
     fn add_to_page(&self, input: &Value) -> ToolReply {
         let id = input["query_id"].as_str().unwrap_or_default();
         let title = input["title"].as_str().unwrap_or_default();
@@ -271,42 +310,90 @@ impl DataTools<'_> {
         if title.is_empty() {
             return failed("Give the block a short title.");
         }
-        let Some(size) = block_size(view) else {
-            return failed("Choose a view: bar, line, number or table.");
+        if !PAGE_VIEWS.contains(&view) {
+            return failed("Choose a view: bar, line, area, stacked, scatter, number or table.");
+        }
+        if let Err(problem) = self.check_columns(id, view, input) {
+            return failed(problem);
+        }
+        let Some(sql) = self.sql_of(id) else {
+            return failed(format!("There is no query {id}."));
         };
         let text_of = |name: &str| input[name].as_str().map(str::to_owned);
-        let (x_column, y_column) = (text_of("x"), text_of("y"));
-        let sql = {
-            let findings = self.findings();
-            let Some(query) = findings.queries.get(id) else {
-                return failed(format!("There is no query {id}."));
-            };
-            let has_column = |name: &Option<String>| {
-                name.as_ref()
-                    .is_some_and(|name| query.result.columns.iter().any(|c| c.name == *name))
-            };
-            if matches!(view, "bar" | "line") && !(has_column(&x_column) && has_column(&y_column)) {
-                return failed("A chart needs x and y set to columns of that query.");
-            }
-            query.page_sql.clone().unwrap_or_else(|| query.sql.clone())
-        };
-        let new_id = format!("b{}", now_ms());
+        let trend_sql = input["trend_query_id"]
+            .as_str()
+            .and_then(|trend| self.sql_of(trend));
+        let new_id = new_block_id();
         self.change_page(title, "added to the Page", |page| {
-            let (x, y) = free_spot(&page.blocks, size.0, size.1);
-            page.blocks.push(Block {
-                id: unique_block_id(page, &new_id),
-                kind: BlockKind::Figure,
-                x,
-                y,
-                w: size.0,
-                h: size.1,
-                title: title.to_owned(),
-                sql: Some(sql),
-                view: Some(view.to_owned()),
-                x_column,
-                y_column,
-                ..Block::default()
-            });
+            place_block(
+                page,
+                Block {
+                    id: new_id,
+                    kind: BlockKind::Figure,
+                    title: title.to_owned(),
+                    sql: Some(sql),
+                    trend_sql,
+                    view: Some(view.to_owned()),
+                    x_column: text_of("x"),
+                    y_column: text_of("y"),
+                    series_column: text_of("series"),
+                    format: text_of("format"),
+                    ..Block::default()
+                },
+            );
+            Ok(())
+        })
+    }
+
+    fn update_block(&self, input: &Value) -> ToolReply {
+        let block_id = input["block_id"].as_str().unwrap_or_default();
+        let text_of = |name: &str| input[name].as_str().map(str::to_owned);
+        let view = text_of("view");
+        if view
+            .as_deref()
+            .is_some_and(|view| !PAGE_VIEWS.contains(&view))
+        {
+            return failed("Choose a view: bar, line, area, stacked, scatter, number or table.");
+        }
+        let query_id = input["query_id"].as_str();
+        if let Some(query_id) = query_id {
+            let chosen = view.as_deref().unwrap_or("table");
+            if let Err(problem) = self.check_columns(query_id, chosen, input) {
+                return failed(problem);
+            }
+        }
+        let sql = match query_id {
+            Some(query_id) => match self.sql_of(query_id) {
+                Some(sql) => Some(sql),
+                None => return failed(format!("There is no query {query_id}.")),
+            },
+            None => None,
+        };
+        let label = text_of("title").unwrap_or_else(|| "Updated a block".to_owned());
+        self.change_page(&label, "changed on the Page", |page| {
+            let Some(block) = find_block(page, block_id) else {
+                return Err(format!("There is no block {block_id}."));
+            };
+            if let Some(sql) = sql {
+                block.sql = Some(sql);
+                block.spec = None;
+            }
+            if let Some(title) = text_of("title") {
+                block.title = title;
+            }
+            if view.is_some() {
+                block.view.clone_from(&view);
+            }
+            for (key, field) in [
+                ("x", &mut block.x_column),
+                ("y", &mut block.y_column),
+                ("series", &mut block.series_column),
+                ("format", &mut block.format),
+            ] {
+                if let Some(value) = text_of(key) {
+                    *field = Some(value);
+                }
+            }
             Ok(())
         })
     }
@@ -316,19 +403,55 @@ impl DataTools<'_> {
         if text.trim().is_empty() {
             return failed("Give the text to add.");
         }
-        let new_id = format!("b{}", now_ms());
+        let sources: BTreeMap<String, String> = referenced_queries(text)
+            .into_iter()
+            .filter_map(|id| {
+                let sql = self.sql_of(&id)?;
+                Some((id, sql))
+            })
+            .collect();
+        let new_id = new_block_id();
         self.change_page("Note", "added to the Page", |page| {
-            let (x, y) = free_spot(&page.blocks, TEXT_SIZE.0, TEXT_SIZE.1);
-            page.blocks.push(Block {
-                id: unique_block_id(page, &new_id),
-                kind: BlockKind::Text,
-                x,
-                y,
-                w: TEXT_SIZE.0,
-                h: TEXT_SIZE.1,
-                text: Some(text.to_owned()),
-                ..Block::default()
-            });
+            place_block(
+                page,
+                Block {
+                    id: new_id,
+                    kind: BlockKind::Text,
+                    text: Some(text.to_owned()),
+                    sources,
+                    ..Block::default()
+                },
+            );
+            Ok(())
+        })
+    }
+
+    fn add_filter_to_page(&self, input: &Value) -> ToolReply {
+        let file = input["file"].as_str().unwrap_or_default();
+        let column = input["column"].as_str().unwrap_or_default();
+        let kind = if input["dates"] == true {
+            FilterKind::Dates
+        } else {
+            FilterKind::Values
+        };
+        if file.is_empty() || column.is_empty() {
+            return failed("Give the file and the column to filter by.");
+        }
+        let id = new_block_id();
+        self.change_page(column, "filter added to the Page", |page| {
+            let exists = page
+                .filters
+                .iter()
+                .any(|filter| filter.table == file && filter.column == column);
+            if !exists {
+                page.filters.push(PageFilter {
+                    id,
+                    table: file.to_owned(),
+                    column: column.to_owned(),
+                    kind,
+                    ..PageFilter::default()
+                });
+            }
             Ok(())
         })
     }
@@ -336,12 +459,10 @@ impl DataTools<'_> {
     fn remove_from_page(&self, input: &Value) -> ToolReply {
         let id = input["block_id"].as_str().unwrap_or_default();
         self.change_page("Removed a block", "from the Page", |page| {
-            let before = page.blocks.len();
-            page.blocks.retain(|block| block.id != id);
-            if page.blocks.len() == before {
-                Err(format!("There is no block {id}."))
-            } else {
+            if remove_block(page, id) {
                 Ok(())
+            } else {
+                Err(format!("There is no block {id}."))
             }
         })
     }
@@ -401,6 +522,28 @@ impl DataTools<'_> {
 }
 
 fn page_tools() -> Vec<ToolDefinition> {
+    let block_properties = json!({
+        "query_id": { "type": "string" },
+        "title": { "type": "string", "description": "Short sentence case title" },
+        "view": {
+            "type": "string",
+            "enum": ["bar", "line", "area", "stacked", "scatter", "number", "table"],
+        },
+        "x": { "type": "string", "description": "Column for a chart's x axis" },
+        "y": { "type": "string", "description": "Column for a chart's values" },
+        "series": { "type": "string", "description": "Column that splits a stacked chart" },
+        "format": {
+            "type": "string",
+            "enum": ["number", "percent", "USD", "EUR", "GBP", "IDR", "JPY"],
+        },
+        "trend_query_id": {
+            "type": "string",
+            "description": "For a number: a query of period and value, oldest first, to show \
+                the latest change",
+        },
+    });
+    let mut update_properties = block_properties.clone();
+    update_properties["block_id"] = json!({ "type": "string" });
     vec![
         ToolDefinition {
             name: "add_to_page",
@@ -408,24 +551,41 @@ fn page_tools() -> Vec<ToolDefinition> {
                 It stays linked to the query, so it updates with the data.",
             input_schema: json!({
                 "type": "object",
-                "properties": {
-                    "query_id": { "type": "string" },
-                    "title": { "type": "string", "description": "Short sentence case title" },
-                    "view": { "type": "string", "enum": ["bar", "line", "number", "table"] },
-                    "x": { "type": "string", "description": "Column for a chart's x axis" },
-                    "y": { "type": "string", "description": "Column for a chart's values" },
-                },
+                "properties": block_properties,
                 "required": ["query_id", "title", "view"],
             }),
         },
         ToolDefinition {
+            name: "update_block",
+            description: "Change a block already on the open Page. Set query_id to replace its \
+                data. Only the fields you give change.",
+            input_schema: json!({
+                "type": "object",
+                "properties": update_properties,
+                "required": ["block_id"],
+            }),
+        },
+        ToolDefinition {
             name: "add_text_to_page",
-            description: "Add a short note to the open Page. Type no numbers from the data here, \
-                because a note won't update when the data does.",
+            description: "Add a short finding to the open Page. Write numbers as references like \
+                {{q1.0.total}} so they stay right when the data or filters change.",
             input_schema: json!({
                 "type": "object",
                 "properties": { "text": { "type": "string" } },
                 "required": ["text"],
+            }),
+        },
+        ToolDefinition {
+            name: "add_filter_to_page",
+            description: "Add a filter to the bar at the top of the open Page.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "file": { "type": "string", "description": "The file name, like orders.csv" },
+                    "column": { "type": "string" },
+                    "dates": { "type": "boolean", "description": "True for a date column" },
+                },
+                "required": ["file", "column"],
             }),
         },
         ToolDefinition {
@@ -518,7 +678,9 @@ impl Toolbox for DataTools<'_> {
             "show_result" => self.show_result(input),
             "ask_user" => self.ask_user(input),
             "add_to_page" => self.add_to_page(input),
+            "update_block" => self.update_block(input),
             "add_text_to_page" => self.add_text_to_page(input),
+            "add_filter_to_page" => self.add_filter_to_page(input),
             "remove_from_page" => self.remove_from_page(input),
             "rename_page" => self.rename_page(input),
             _ => failed(format!("There is no tool called {name}.")),
@@ -849,7 +1011,8 @@ mod tests {
                 id: "p1".to_owned(),
                 title: "Overview".to_owned(),
                 updated_at: 1,
-                blocks: Vec::new(),
+                rows: Vec::new(),
+                filters: Vec::new(),
             },
         )
         .unwrap();
@@ -912,13 +1075,14 @@ mod tests {
         );
 
         let saved = davis_project::read_page(&project, "p1").unwrap();
-        assert_eq!(saved.blocks.len(), 2);
-        assert_ne!(saved.blocks[0].id, saved.blocks[1].id);
+        let blocks: Vec<&Block> = saved.rows.iter().flat_map(|row| &row.blocks).collect();
+        assert_eq!(blocks.len(), 2);
+        assert_ne!(blocks[0].id, blocks[1].id);
         assert_eq!(
-            saved.blocks[0].sql.as_deref(),
+            blocks[0].sql.as_deref(),
             Some("SELECT region, amount FROM sales")
         );
-        assert_eq!((saved.blocks[1].x, saved.blocks[1].y), (6, 0));
+        assert_eq!(saved.rows.len(), 1);
         assert_eq!(steps.lock().unwrap().last().unwrap().kind, StepKind::Page);
     }
 
@@ -953,9 +1117,122 @@ mod tests {
         assert!(
             davis_project::read_page(&project, "p1")
                 .unwrap()
-                .blocks
+                .rows
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn a_selected_block_can_be_changed_in_place() {
+        let folder = Folder::new();
+        let page = page_project(&folder);
+        let project = page.project.clone();
+        let steps = Steps::default();
+        let box_ = QuestionBox::default();
+
+        with_page(
+            vec![folder.table("sales", SALES)],
+            Some(page),
+            &box_,
+            &steps,
+            Arc::default(),
+            |tools| {
+                query(tools, "SELECT region, amount FROM sales");
+                tools.call(
+                    "add_to_page",
+                    &json!({
+                        "query_id": "q1", "title": "Sales", "view": "bar",
+                        "x": "region", "y": "amount",
+                    }),
+                );
+                let id = davis_project::read_page(&project, "p1").unwrap().rows[0].blocks[0]
+                    .id
+                    .clone();
+                query(tools, "SELECT amount AS money, region FROM sales");
+
+                let changed = tools.call(
+                    "update_block",
+                    &json!({
+                        "block_id": id, "query_id": "q2", "title": "Money",
+                        "view": "line", "x": "region", "y": "money", "format": "USD",
+                    }),
+                );
+                assert!(!changed.is_error);
+                assert!(
+                    tools
+                        .call("update_block", &json!({ "block_id": "nope", "title": "X" }))
+                        .is_error
+                );
+            },
+        );
+
+        let saved = davis_project::read_page(&project, "p1").unwrap();
+        assert_eq!(saved.rows.len(), 1);
+        let block = &saved.rows[0].blocks[0];
+        assert_eq!(block.title, "Money");
+        assert_eq!(block.view.as_deref(), Some("line"));
+        assert_eq!(block.y_column.as_deref(), Some("money"));
+        assert_eq!(block.format.as_deref(), Some("USD"));
+        assert_eq!(
+            block.sql.as_deref(),
+            Some("SELECT amount AS money, region FROM sales")
+        );
+    }
+
+    #[test]
+    fn a_note_keeps_the_queries_behind_its_numbers() {
+        let folder = Folder::new();
+        let page = page_project(&folder);
+        let project = page.project.clone();
+        let steps = Steps::default();
+        let box_ = QuestionBox::default();
+
+        with_page(
+            vec![folder.table("sales", SALES)],
+            Some(page),
+            &box_,
+            &steps,
+            Arc::default(),
+            |tools| {
+                query(tools, "SELECT sum(amount) AS total FROM sales");
+                tools.call(
+                    "add_text_to_page",
+                    &json!({ "text": "Sales reached {{q1.0.total}}." }),
+                );
+            },
+        );
+
+        let saved = davis_project::read_page(&project, "p1").unwrap();
+        assert_eq!(
+            saved.rows[0].blocks[0].sources["q1"],
+            "SELECT sum(amount) AS total FROM sales"
+        );
+    }
+
+    #[test]
+    fn a_filter_goes_in_the_bar_once() {
+        let folder = Folder::new();
+        let page = page_project(&folder);
+        let project = page.project.clone();
+        let steps = Steps::default();
+        let box_ = QuestionBox::default();
+
+        with_page(
+            Vec::new(),
+            Some(page),
+            &box_,
+            &steps,
+            Arc::default(),
+            |tools| {
+                let add = json!({ "file": "customers.csv", "column": "region" });
+                assert!(!tools.call("add_filter_to_page", &add).is_error);
+                assert!(!tools.call("add_filter_to_page", &add).is_error);
+            },
+        );
+
+        let saved = davis_project::read_page(&project, "p1").unwrap();
+        assert_eq!(saved.filters.len(), 1);
+        assert_eq!(saved.filters[0].column, "region");
     }
 
     #[test]
@@ -983,7 +1260,7 @@ mod tests {
                         .call("rename_page", &json!({ "title": "Q3" }))
                         .is_error
                 );
-                let id = davis_project::read_page(&project, "p1").unwrap().blocks[0]
+                let id = davis_project::read_page(&project, "p1").unwrap().rows[0].blocks[0]
                     .id
                     .clone();
                 assert!(
@@ -1001,7 +1278,7 @@ mod tests {
 
         let saved = davis_project::read_page(&project, "p1").unwrap();
         assert_eq!(saved.title, "Q3");
-        assert!(saved.blocks.is_empty());
+        assert!(saved.rows.is_empty());
     }
 
     #[test]
