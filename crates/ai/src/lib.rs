@@ -1,4 +1,5 @@
 mod apps;
+mod ask;
 mod connection;
 mod error;
 mod install;
@@ -10,6 +11,9 @@ mod settings;
 mod terminal;
 
 pub use apps::{Account, AppStatus, Detected, detect};
+pub use ask::{
+    AskColumn, AskRequest, AskTurn, ChartKind, ChartPlan, PlanProgress, QueryPlan, plan_query,
+};
 pub use connection::{Connection, ConnectionRequest, connect, disconnect};
 pub use error::{Error, Result};
 pub use install::install_app;

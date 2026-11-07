@@ -1,6 +1,6 @@
 import { ArrowDown01Icon } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -31,6 +31,7 @@ import { EffortMeter, effortLabel } from "@/features/ai-setup/effort-meter"
 import { useChosenModel } from "@/features/ai-setup/use-chosen-model"
 import { useConnectedProviders } from "@/features/ai-setup/use-connected-providers"
 import { useModels } from "@/features/ai-setup/use-models"
+import { cn } from "@/lib/utils"
 
 function choiceFor(providerId: string, model: Model, effort?: string | null) {
   const keepsEffort = effort != null && model.efforts.includes(effort)
@@ -213,9 +214,21 @@ function EffortList({ model, effort, onPick }: EffortListProps) {
   )
 }
 
-export function ModelPicker() {
+type ModelPickerProps = {
+  variant?: "outline" | "ghost"
+  size?: "default" | "sm"
+  side?: "top" | "bottom"
+  className?: string
+}
+
+export function ModelPicker({
+  variant = "outline",
+  size = "default",
+  side = "bottom",
+  className,
+}: ModelPickerProps) {
   const providers = useConnectedProviders()
-  const [chosen, choose] = useChosenModel()
+  const { chosen, choose, hasLoaded } = useChosenModel()
   const [isOpen, setIsOpen] = useState(false)
   const [viewedId, setViewedId] = useState<string>()
   const [highlightedId, setHighlightedId] = useState<string>()
@@ -226,6 +239,18 @@ export function ModelPicker() {
   const activeId = saved?.providerId ?? providers?.[0]?.id
   const shownId = viewedId ?? activeId
   const { modelsOf, hasFailed, retry } = useModels(shownId)
+  const activeModels = activeId ? modelsOf(activeId) : undefined
+  const isGone = saved && activeModels?.every(({ id }) => id !== saved.modelId)
+  const needsDefault = hasLoaded && (!saved || isGone) && activeId
+  const firstModel = needsDefault ? activeModels?.[0] : undefined
+  const fallback = firstModel && choiceFor(activeId as string, firstModel)
+  const fallbackId = fallback?.modelId
+
+  // Chat reads the saved choice, so the model shown here has to be saved too.
+  useEffect(() => {
+    if (fallback && fallbackId) choose(fallback)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fallbackId, choose])
 
   if (!providers) return null
   if (!activeId || !shownId) {
@@ -236,13 +261,11 @@ export function ModelPicker() {
     )
   }
 
-  const activeProvider = providers.find(({ id }) => id === activeId)
+  const activeProvider = providers?.find(({ id }) => id === activeId)
   const shownProvider = providers.find(({ id }) => id === shownId)
   if (!activeProvider || !shownProvider) return null
 
-  const activeModels = modelsOf(activeId)
   const models = modelsOf(shownId)
-  const isGone = saved && activeModels?.every(({ id }) => id !== saved.modelId)
   const current: ChosenModel | undefined =
     saved && !isGone
       ? saved
@@ -288,9 +311,10 @@ export function ModelPicker() {
       <PopoverTrigger
         render={
           <Button
-            variant="outline"
+            variant={variant}
+            size={size}
             aria-label="Choose a model"
-            className="max-w-72 animate-fade font-normal"
+            className={cn("max-w-72 animate-fade font-normal", className)}
           />
         }
       >
@@ -318,7 +342,7 @@ export function ModelPicker() {
       </PopoverTrigger>
       <PopoverContent
         aria-label="Choose a model"
-        side="bottom"
+        side={side}
         align="end"
         sideOffset={6}
         className="h-72 w-110 flex-row gap-0 overflow-hidden p-0 shadow-2xl"

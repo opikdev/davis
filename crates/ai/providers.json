@@ -28,7 +28,8 @@
     "icon": "google-gemini",
     "keyUrl": "https://aistudio.google.com/apikey",
     "testUrl": "https://generativelanguage.googleapis.com/v1beta/models",
-    "auth": "x-goog-api-key"
+    "auth": "x-goog-api-key",
+    "chatUrl": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
   },
   {
     "id": "xai",
@@ -169,7 +170,8 @@
     "icon": "cohere",
     "keyUrl": "https://dashboard.cohere.com/api-keys",
     "testUrl": "https://api.cohere.com/v1/models",
-    "auth": "bearer"
+    "auth": "bearer",
+    "chatUrl": "https://api.cohere.ai/compatibility/v1/chat/completions"
   },
   {
     "id": "xiaomi-mimo",

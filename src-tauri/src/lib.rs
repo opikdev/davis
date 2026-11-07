@@ -3,6 +3,7 @@ mod error;
 
 pub fn run() {
     tauri::Builder::default()
+        .manage(commands::chat::AskRegistry::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -17,6 +18,8 @@ pub fn run() {
             commands::ai::list_models,
             commands::ai::onboarding_status,
             commands::ai::open_sign_in,
+            commands::chat::ask_about_table,
+            commands::chat::stop_asking,
             commands::engine::engine_info,
             commands::engine::open_table,
             commands::engine::read_rows,

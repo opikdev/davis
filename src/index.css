@@ -28,6 +28,7 @@
   --animate-pop: pop 180ms var(--ease-native) backwards;
   --animate-reveal: reveal 200ms var(--ease-native) backwards;
   --animate-chart-dot: chart-dot 420ms var(--ease-native) backwards;
+  --animate-wave: wave 900ms ease-in-out infinite;
 
   @keyframes step {
     from {
@@ -56,6 +57,16 @@
     }
     to {
       max-height: 16rem;
+    }
+  }
+
+  @keyframes wave {
+    0%,
+    100% {
+      transform: scaleY(0.35);
+    }
+    50% {
+      transform: scaleY(1);
     }
   }
 
@@ -135,11 +146,11 @@
   --input: oklch(0.9 0 0);
   --ring: oklch(0.47 0.095 245);
   --success: oklch(0.5 0.13 155);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --chart-1: #266ea4;
+  --chart-2: #cc7942;
+  --chart-3: #0a7f60;
+  --chart-4: #ad8819;
+  --chart-5: #b65e8b;
   --radius: 0.5rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.47 0 0);
@@ -172,11 +183,11 @@
   --input: oklch(0.33 0 0);
   --ring: oklch(0.78 0.07 240);
   --success: oklch(0.78 0.15 155);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --chart-1: #5798ce;
+  --chart-2: #c17842;
+  --chart-3: #2a9a82;
+  --chart-4: #b1913c;
+  --chart-5: #b3628a;
   --sidebar: oklch(0.243 0 0);
   --sidebar-foreground: oklch(0.73 0 0);
   --sidebar-primary: var(--primary);

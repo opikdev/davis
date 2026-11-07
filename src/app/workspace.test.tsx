@@ -22,6 +22,17 @@ const drops = vi.hoisted(() => ({
 }))
 const chooseFile = vi.hoisted(() => vi.fn())
 
+// The panel library measures real layout, which jsdom doesn't have.
+vi.mock("@/components/ui/resizable", () => ({
+  ResizablePanelGroup: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  ResizablePanel: ({ children }: { children: React.ReactNode }) => (
+    <div>{children}</div>
+  ),
+  ResizableHandle: () => null,
+}))
+
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: chooseFile }))
 
 vi.mock("@tauri-apps/api/webview", () => ({
@@ -83,6 +94,8 @@ type Backend = {
   onChoose?: (choice: unknown) => void
   openTable?: () => unknown
   rows?: (args: unknown) => unknown
+  ask?: (args: unknown) => unknown
+  onStop?: (turn: unknown) => void
 }
 
 function renderWorkspace({
@@ -93,6 +106,8 @@ function renderWorkspace({
   onChoose,
   openTable,
   rows,
+  ask,
+  onStop,
 }: Backend = {}) {
   mockIPC((command, args) => {
     const payload = args as Record<string, unknown>
@@ -102,6 +117,8 @@ function renderWorkspace({
     if (command === "choose_model") onChoose?.(payload.choice)
     if (command === "open_table") return openTable?.()
     if (command === "read_rows") return rows?.(payload)
+    if (command === "ask_about_table") return ask?.(payload)
+    if (command === "stop_asking") onStop?.(payload.turn)
     return undefined
   })
   render(<Workspace />)
@@ -295,6 +312,271 @@ test("the keyboard reaches the end of a huge table", async () => {
   fireEvent.keyDown(table, { key: "End" })
 
   expect(await screen.findByText("row 999999")).toBeTruthy()
+})
+
+const SALES_ANSWER = {
+  title: "Sales by region",
+  sql: "SELECT region, sum(amount) AS total FROM data GROUP BY 1",
+  chart: { kind: "bar", x: "region", y: "total" },
+  result: {
+    columns: [
+      { name: "region", dataType: "VARCHAR", kind: "text" },
+      { name: "total", dataType: "BIGINT", kind: "number" },
+    ],
+    rows: [
+      ["EMEA", "1500"],
+      ["APAC", "900"],
+    ],
+    isTruncated: false,
+  },
+}
+
+async function renderOpenTable(
+  ask: Backend["ask"],
+  onStop?: Backend["onStop"]
+) {
+  renderWorkspace({
+    connected: () => ["claude-code"],
+    openTable: () => SALES_TABLE,
+    rows: () => [["EMEA", "1200"]],
+    ask,
+    onStop,
+  })
+  dropFile("/data/sales.csv")
+  await screen.findByText("1200")
+}
+
+async function askQuestion(text: string) {
+  const box = screen.getByRole("textbox", { name: "Ask about this data" })
+  await userEvent.type(box, `${text}{Enter}`)
+}
+
+test("asking shows the answer, its rows, and the query", async () => {
+  await renderOpenTable(() => SALES_ANSWER)
+
+  await askQuestion("Sales by region?")
+
+  expect(await screen.findByText("Sales by region")).toBeTruthy()
+  expect(screen.getByText("Sales by region?")).toBeTruthy()
+  expect(screen.getByText("1500")).toBeTruthy()
+})
+
+test("the work is shown as it happens, then folds away", async () => {
+  await renderOpenTable((args) => {
+    const steps = (args as { onStep: { onmessage: (step: unknown) => void } })
+      .onStep
+    steps.onmessage({
+      id: "read",
+      kind: "read",
+      status: "done",
+      label: "Read columns",
+      detail: "2 names and types",
+      body: null,
+    })
+    steps.onmessage({
+      id: "write-1",
+      kind: "write",
+      status: "running",
+      label: "Writing query",
+      detail: null,
+      body: "SELECT region",
+    })
+    return new Promise((resolve) =>
+      setTimeout(() => {
+        steps.onmessage({
+          id: "write-1",
+          kind: "write",
+          status: "done",
+          label: "Writing query",
+          detail: null,
+          body: SALES_ANSWER.sql,
+        })
+        resolve(SALES_ANSWER)
+      }, 80)
+    )
+  })
+
+  await askQuestion("Sales?")
+
+  expect(await screen.findByText("Read columns")).toBeTruthy()
+  expect(screen.getByText("SELECT region")).toBeTruthy()
+  expect(screen.getByRole("status").textContent).toContain("Writing query")
+
+  await screen.findByText("Sales by region")
+  expect(screen.queryByText("Read columns")).toBeNull()
+
+  await userEvent.click(screen.getByRole("button", { name: /Worked for/ }))
+  expect(await screen.findByText(SALES_ANSWER.sql)).toBeTruthy()
+})
+
+test("Stop ends the question and tells the app", async () => {
+  const onStop = vi.fn()
+  await renderOpenTable(() => new Promise(() => {}), onStop)
+
+  await askQuestion("Sales?")
+  await userEvent.click(await screen.findByRole("button", { name: "Stop" }))
+
+  expect(await screen.findByText("Stopped")).toBeTruthy()
+  expect(onStop).toHaveBeenCalledWith(1)
+  expect(screen.getByRole("button", { name: "Send" })).toBeTruthy()
+})
+
+test("A stopped question shows no error", async () => {
+  await renderOpenTable(() => {
+    throw { kind: "stopped", message: "Stopped." }
+  })
+
+  await askQuestion("Sales?")
+
+  expect(await screen.findByText("Stopped")).toBeTruthy()
+  expect(screen.queryByRole("alert")).toBeNull()
+})
+
+test("New chat starts over", async () => {
+  await renderOpenTable(() => SALES_ANSWER)
+  await askQuestion("Sales?")
+  await screen.findByText("Sales by region")
+
+  await userEvent.click(screen.getByRole("button", { name: "New chat" }))
+
+  expect(screen.queryByText("Sales by region")).toBeNull()
+})
+
+test("only the question, column names, and earlier queries are sent", async () => {
+  const ask = vi.fn<(args: unknown) => unknown>(() => SALES_ANSWER)
+  await renderOpenTable(ask)
+
+  await askQuestion("First?")
+  await screen.findByText("Sales by region")
+  await askQuestion("Second?")
+  await waitFor(() => expect(ask).toHaveBeenCalledTimes(2))
+
+  expect(ask.mock.calls[1][0]).toMatchObject({
+    source: SALES_TABLE.source,
+    request: {
+      question: "Second?",
+      columns: [
+        { name: "region", dataType: "VARCHAR" },
+        { name: "amount", dataType: "BIGINT" },
+      ],
+      history: [{ question: "First?", sql: SALES_ANSWER.sql }],
+    },
+  })
+  expect(JSON.stringify(ask.mock.calls[1][0])).not.toContain("1200")
+})
+
+test("one number is shown as the answer itself", async () => {
+  await renderOpenTable(() => ({
+    title: "Row count",
+    sql: "SELECT count(*) AS n FROM data",
+    chart: null,
+    result: {
+      columns: [{ name: "n", dataType: "BIGINT", kind: "number" }],
+      rows: [["2964624"]],
+      isTruncated: false,
+    },
+  }))
+
+  await askQuestion("How many?")
+
+  expect(await screen.findByText("2964624")).toBeTruthy()
+  expect(screen.queryByRole("table", { name: "Result" })).toBeNull()
+})
+
+test("an answer with no query still explains itself", async () => {
+  await renderOpenTable(() => ({
+    title: "This file has no date column",
+    sql: null,
+    chart: null,
+    result: null,
+  }))
+
+  await askQuestion("Sales by month?")
+
+  expect(await screen.findByText("This file has no date column")).toBeTruthy()
+})
+
+test("a failed question explains why and can be retried", async () => {
+  const report = vi.spyOn(console, "error").mockImplementation(() => {})
+  let isDown = true
+  await renderOpenTable(() => {
+    if (isDown)
+      throw { kind: "ask-failed", message: "Claude Code couldn't answer." }
+    return SALES_ANSWER
+  })
+
+  await askQuestion("Sales?")
+  expect(await screen.findByText("Claude Code couldn't answer.")).toBeTruthy()
+
+  isDown = false
+  await userEvent.click(screen.getByRole("button", { name: "Try again" }))
+
+  expect(await screen.findByText("Sales by region")).toBeTruthy()
+  report.mockRestore()
+})
+
+test("Shift and Enter adds a line instead of sending", async () => {
+  const ask = vi.fn(() => SALES_ANSWER)
+  await renderOpenTable(ask)
+  const box = screen.getByRole("textbox", { name: "Ask about this data" })
+
+  await userEvent.type(box, "Line one{Shift>}{Enter}{/Shift}two")
+
+  expect(ask).not.toHaveBeenCalled()
+  expect(box).toHaveProperty("value", "Line one\ntwo")
+})
+
+test("the chat survives a visit to another section", async () => {
+  await renderOpenTable(() => SALES_ANSWER)
+  await askQuestion("Sales?")
+  await screen.findByText("Sales by region")
+
+  await userEvent.click(screen.getByRole("button", { name: "Pages" }))
+  await userEvent.click(screen.getByRole("button", { name: "Data" }))
+
+  expect(screen.getByText("Sales by region")).toBeTruthy()
+})
+
+test("Ask AI shows it's on, and turns the chat off and back", async () => {
+  await renderOpenTable(() => SALES_ANSWER)
+  const toggle = screen.getByRole("button", { name: "Ask AI" })
+  expect(toggle.getAttribute("aria-pressed")).toBe("true")
+
+  await userEvent.click(toggle)
+  expect(toggle.getAttribute("aria-pressed")).toBe("false")
+
+  await userEvent.click(toggle)
+  expect(toggle.getAttribute("aria-pressed")).toBe("true")
+})
+
+test("the model shown first is saved, so chat can use it", async () => {
+  const onChoose = vi.fn()
+  await renderSettings({ connected: () => ["claude-code"], onChoose })
+
+  await waitFor(() =>
+    expect(onChoose).toHaveBeenCalledWith(
+      expect.objectContaining({ modelId: "claude-opus", effort: "medium" })
+    )
+  )
+})
+
+test("a saved model is not replaced while it loads", async () => {
+  const onChoose = vi.fn()
+  await renderSettings({
+    connected: () => ["claude-code"],
+    chosen: {
+      providerId: "claude-code",
+      modelId: "claude-haiku",
+      modelName: "Claude Haiku",
+      effort: "low",
+    },
+    onChoose,
+  })
+
+  const picker = await screen.findByRole("button", { name: "Choose a model" })
+  await waitFor(() => expect(picker.textContent).toContain("Claude Haiku"))
+
+  expect(onChoose).not.toHaveBeenCalled()
 })
 
 test("Browse files opens the chosen file", async () => {
@@ -515,6 +797,8 @@ test("pointing at a model shows its efforts, and one click picks both", async ()
   await renderSettings({ connected: () => ["claude-code"], onChoose })
   const picker = await openPicker()
   await screen.findByRole("radio", { name: "Extra high" })
+  await waitFor(() => expect(onChoose).toHaveBeenCalled())
+  onChoose.mockClear()
 
   await userEvent.hover(screen.getByRole("option", { name: "Claude Haiku" }))
   await waitFor(() =>

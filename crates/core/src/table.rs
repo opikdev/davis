@@ -133,7 +133,7 @@ pub fn read_rows(source: &TableSource, offset: u64, limit: u64) -> Result<Vec<Ro
     Ok(read)
 }
 
-fn connect() -> Result<Connection> {
+pub(crate) fn connect() -> Result<Connection> {
     let connection = Connection::open_in_memory()?;
     connection.execute_batch(
         "SET autoinstall_known_extensions = false; SET autoload_known_extensions = false;",
@@ -270,7 +270,7 @@ fn count_rows(connection: &Connection, source: &TableSource) -> Result<u64> {
     Ok(count.unsigned_abs())
 }
 
-fn kind_of(data_type: &str) -> ColumnKind {
+pub(crate) fn kind_of(data_type: &str) -> ColumnKind {
     let base = data_type.split('(').next().unwrap_or(data_type);
     match base {
         "TINYINT" | "SMALLINT" | "INTEGER" | "BIGINT" | "HUGEINT" | "UTINYINT" | "USMALLINT"
@@ -291,7 +291,7 @@ fn kind_of(data_type: &str) -> ColumnKind {
 }
 
 // Rows are read as plain text so what's shown is exactly what the file holds.
-fn scan(source: &TableSource, as_text: bool) -> String {
+pub(crate) fn scan(source: &TableSource, as_text: bool) -> String {
     let path = quoted(&without_wildcards(&source.path));
     match source.format {
         Format::Parquet => format!("read_parquet({path})"),
@@ -319,7 +319,7 @@ fn scan(source: &TableSource, as_text: bool) -> String {
     }
 }
 
-fn quoted(text: &str) -> String {
+pub(crate) fn quoted(text: &str) -> String {
     format!("'{}'", text.replace('\'', "''"))
 }
 

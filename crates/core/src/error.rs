@@ -10,6 +10,16 @@ pub enum Error {
     EmptyFile(String),
     #[error("Couldn't read {0}. The file may be damaged or not a table.")]
     Unreadable(String),
+    #[error("Davis only runs queries that read data.")]
+    RejectedQuery,
+    #[error("{0}")]
+    InvalidQuery(String),
+    #[error("That query took too long, so Davis stopped it.")]
+    SlowQuery,
+    #[error("Stopped.")]
+    StoppedQuery,
+    #[error("Davis couldn't finish that query. A value may not match its column type.")]
+    FailedQuery,
 }
 
 impl Error {
@@ -20,6 +30,11 @@ impl Error {
             Self::MissingFile(_) => "missing-file",
             Self::EmptyFile(_) => "empty-file",
             Self::Unreadable(_) => "unreadable-file",
+            Self::RejectedQuery => "rejected-query",
+            Self::InvalidQuery(_) => "invalid-query",
+            Self::SlowQuery => "slow-query",
+            Self::StoppedQuery => "stopped",
+            Self::FailedQuery => "failed-query",
         }
     }
 }

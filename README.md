@@ -2,7 +2,7 @@
 
 Local data workspace built with Rust, Tauri, and React. Your files stay on your computer, and you choose which AI to connect.
 
-Early scaffold: the app runs onboarding, connects to an AI provider, and opens CSV, Parquet, and JSON files in a table. Chat, connections, and Pages are not built yet.
+Early scaffold: the app runs onboarding, connects to an AI provider, and opens CSV, Parquet, and JSON files in a table, and answers questions about them with charts. Connections and Pages are not built yet.
 
 ## Run
 

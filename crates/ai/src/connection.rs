@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use url::{Host, Url};
 
 use crate::apps::{Account, AppStatus, check_app, search_folders};
+use crate::ask::failed_status;
 use crate::providers::{Auth, Group, Provider, find_provider};
 use crate::settings::{SavedConnection, Settings};
 use crate::{Error, Result, secrets};
@@ -112,7 +113,7 @@ pub(crate) fn check_endpoint(
 }
 
 pub(crate) fn fetch(provider: &Provider, target: Url, api_key: Option<&str>) -> Result<Response> {
-    let client = client_for(&target).map_err(|_| Error::Unreachable)?;
+    let client = client_for(&target, REQUEST_TIMEOUT).map_err(|_| Error::Unreachable)?;
     let request = authorize(client.get(target), provider.auth, api_key);
     let response = request.send().map_err(|_| Error::Unreachable)?;
 
@@ -128,10 +129,34 @@ pub(crate) fn fetch(provider: &Provider, target: Url, api_key: Option<&str>) -> 
     }
 }
 
+pub(crate) fn post_json(
+    target: Url,
+    auth: Option<Auth>,
+    api_key: Option<&str>,
+    header: Option<(&str, &str)>,
+    body: &serde_json::Value,
+    time_limit: Duration,
+) -> Result<serde_json::Value> {
+    let client = client_for(&target, time_limit).map_err(|_| Error::Unreachable)?;
+    let mut request = authorize(client.post(target), auth, api_key)
+        .header("content-type", "application/json")
+        .body(body.to_string());
+    if let Some((name, value)) = header {
+        request = request.header(name, value);
+    }
+    let response = request.send().map_err(|_| Error::Unreachable)?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(failed_status(status));
+    }
+    let text = response.text().map_err(|_| Error::Unreachable)?;
+    serde_json::from_str(&text).map_err(|_| Error::Unreachable)
+}
+
 // A system proxy must never see a key meant for this computer.
-fn client_for(target: &Url) -> reqwest::Result<Client> {
+fn client_for(target: &Url, time_limit: Duration) -> reqwest::Result<Client> {
     let builder = Client::builder()
-        .timeout(REQUEST_TIMEOUT)
+        .timeout(time_limit)
         .connect_timeout(CONNECT_TIMEOUT)
         .redirect(Policy::none());
     if is_this_computer(target) {

@@ -35,6 +35,7 @@ pub struct Provider {
     pub test_url: Option<String>,
     pub test_path: Option<String>,
     pub models_url: Option<String>,
+    pub chat_url: Option<String>,
     #[serde(default)]
     pub models: Vec<Model>,
     pub default_url: Option<String>,
@@ -77,7 +78,7 @@ mod tests {
     #[test]
     fn hosted_providers_only_test_over_https() {
         for provider in providers() {
-            for url in [&provider.test_url, &provider.models_url]
+            for url in [&provider.test_url, &provider.models_url, &provider.chat_url]
                 .into_iter()
                 .flatten()
             {

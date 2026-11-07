@@ -20,6 +20,14 @@ beforeEach(() => {
     addEventListener: () => {},
     removeEventListener: () => {},
   }))
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+  )
 })
 
 afterEach(() => {

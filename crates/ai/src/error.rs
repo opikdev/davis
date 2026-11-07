@@ -28,6 +28,18 @@ pub enum Error {
     NotDetectedAfterInstall(String),
     #[error("Could not list the models for {0}")]
     ModelsUnavailable(String),
+    #[error("Choose an AI model in Settings first.")]
+    NoModelChosen,
+    #[error("{0} couldn't answer that. Check that it's signed in, or try another model.")]
+    AskFailed(String),
+    #[error("{0} declined to answer that question.")]
+    AskRefused(String),
+    #[error("{0} gave an answer Davis couldn't read. Try asking again.")]
+    UnclearReply(String),
+    #[error("This model isn't available. Choose another one in Settings.")]
+    ModelUnavailable,
+    #[error("Stopped.")]
+    Stopped,
     #[error("Could not open Terminal: {0}")]
     Terminal(String),
     #[error("Could not use the system keychain: {0}")]
@@ -53,6 +65,12 @@ impl Error {
             Self::InstallFailed { .. } => "install-failed",
             Self::NotDetectedAfterInstall(_) => "not-detected-after-install",
             Self::ModelsUnavailable(_) => "models-unavailable",
+            Self::NoModelChosen => "no-model-chosen",
+            Self::AskFailed(_) => "ask-failed",
+            Self::AskRefused(_) => "ask-refused",
+            Self::UnclearReply(_) => "unclear-reply",
+            Self::ModelUnavailable => "model-unavailable",
+            Self::Stopped => "stopped",
             Self::Terminal(_) => "terminal",
             Self::Keychain(_) => "keychain",
             Self::Settings(_) => "settings",

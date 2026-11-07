@@ -8,15 +8,21 @@ import {
 
 export function useChosenModel() {
   const [chosen, setChosen] = useState<ChosenModel | null>(null)
+  const [hasLoaded, setHasLoaded] = useState(false)
 
   useEffect(() => {
     let isCurrent = true
 
     getChosenModel().then(
       (saved) => {
-        if (isCurrent) setChosen((latest) => latest ?? saved)
+        if (!isCurrent) return
+        setChosen((latest) => latest ?? saved)
+        setHasLoaded(true)
       },
-      (error: unknown) => console.error("Could not read the model", error)
+      (error: unknown) => {
+        console.error("Could not read the model", error)
+        if (isCurrent) setHasLoaded(true)
+      }
     )
 
     return () => {
@@ -31,5 +37,5 @@ export function useChosenModel() {
     )
   }, [])
 
-  return [chosen, choose] as const
+  return { chosen, choose, hasLoaded }
 }

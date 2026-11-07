@@ -1,11 +1,13 @@
 import {
+  AiChat02Icon,
   DashboardSquare01Icon,
   Database01Icon,
 } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react"
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 
 import { AppSidebar, VIEW_LABELS, type View } from "@/app/app-sidebar"
+import { Button } from "@/components/ui/button"
 import {
   Empty,
   EmptyDescription,
@@ -21,17 +23,33 @@ import {
   ItemTitle,
 } from "@/components/ui/item"
 import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable"
+import {
   SidebarInset,
   SidebarProvider,
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar"
 import { ModelPicker } from "@/features/ai-setup"
+import { ChatPanel, useChat } from "@/features/chat"
 import { DataView, useOpenTable, type OpenedTable } from "@/features/data"
 import { Home, useFileDrop } from "@/features/home"
 import { cn } from "@/lib/utils"
 
-function PanelHeader({ view, table }: { view: View; table?: OpenedTable }) {
+const CHAT_WIDTH = "19rem"
+
+function PanelHeader({
+  view,
+  table,
+  action,
+}: {
+  view: View
+  table?: OpenedTable
+  action: ReactNode
+}) {
   const { state } = useSidebar()
   const showsTable = view === "data" && table
 
@@ -55,6 +73,7 @@ function PanelHeader({ view, table }: { view: View; table?: OpenedTable }) {
           <span className="truncate text-foreground">{table.name}</span>
         </>
       )}
+      {action}
     </header>
   )
 }
@@ -119,9 +138,7 @@ function CurrentView({ view, files, isDragging, onBrowse }: CurrentViewProps) {
         />
       )
     case "data":
-      return files.table ? (
-        <DataView table={files.table} />
-      ) : (
+      return files.table ? null : (
         <EmptyView
           icon={Database01Icon}
           title="No data yet"
@@ -141,9 +158,39 @@ function CurrentView({ view, files, isDragging, onBrowse }: CurrentViewProps) {
   }
 }
 
+function ChatToggle({
+  isOpen,
+  onToggle,
+}: {
+  isOpen: boolean
+  onToggle: () => void
+}) {
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      aria-pressed={isOpen}
+      className="ml-auto shrink-0 font-normal text-muted-foreground aria-pressed:bg-muted aria-pressed:text-foreground"
+      onClick={onToggle}
+    >
+      <HugeiconsIcon
+        icon={AiChat02Icon}
+        strokeWidth={1.5}
+        data-icon="inline-start"
+      />
+      Ask AI
+    </Button>
+  )
+}
+
 export function Workspace() {
   const [view, setView] = useState<View>("home")
+  const [isChatOpen, setIsChatOpen] = useState(true)
   const files = useOpenTable()
+  const chat = useChat(files.table)
+  const [chatWidth, setChatWidth] = useState(CHAT_WIDTH)
+  const showsTable = view === "data" && Boolean(files.table)
+  const showsChat = showsTable && isChatOpen
 
   function showResult(isOpen: boolean) {
     setView(isOpen ? "data" : "home")
@@ -171,16 +218,64 @@ export function Workspace() {
         fileName={files.table?.name}
         onViewChange={setView}
       />
-      <SidebarInset className="min-h-0 overflow-hidden">
-        <PanelHeader view={view} table={files.table} />
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <CurrentView
-            view={view}
-            files={files}
-            isDragging={isDragging}
-            onBrowse={() => void browse()}
-          />
-        </div>
+      <SidebarInset className="min-h-0 overflow-hidden bg-transparent md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:border-0">
+        <ResizablePanelGroup
+          orientation="horizontal"
+          onLayoutChanged={({ chat: share }) => {
+            if (share) setChatWidth(`${share}%`)
+          }}
+        >
+          <ResizablePanel id="main" minSize="320px">
+            <div className="flex h-full min-w-0 flex-col overflow-hidden rounded-xl border bg-background">
+              <PanelHeader
+                view={view}
+                table={files.table}
+                action={
+                  showsTable && (
+                    <ChatToggle
+                      isOpen={isChatOpen}
+                      onToggle={() => setIsChatOpen(!isChatOpen)}
+                    />
+                  )
+                }
+              />
+              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+                <CurrentView
+                  view={view}
+                  files={files}
+                  isDragging={isDragging}
+                  onBrowse={() => void browse()}
+                />
+                {files.table && (
+                  <div
+                    className={cn(
+                      "flex min-h-0 flex-1",
+                      view !== "data" && "hidden"
+                    )}
+                  >
+                    <DataView
+                      key={files.table.source.path}
+                      table={files.table}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          </ResizablePanel>
+          {showsChat && files.table && (
+            <>
+              <ResizableHandle className="w-1.5 bg-transparent after:w-1.5 hover:bg-foreground/10 focus-visible:ring-0" />
+              <ResizablePanel
+                id="chat"
+                defaultSize={chatWidth}
+                minSize="16rem"
+                maxSize="34rem"
+              >
+                <ChatPanel table={files.table} chat={chat} />
+              </ResizablePanel>
+            </>
+          )}
+        </ResizablePanelGroup>
       </SidebarInset>
     </SidebarProvider>
   )

@@ -16,7 +16,7 @@ pub struct OnboardingStatus {
     is_complete: bool,
 }
 
-fn settings_path(app: &AppHandle) -> Result<PathBuf, AppError> {
+pub(crate) fn settings_path(app: &AppHandle) -> Result<PathBuf, AppError> {
     Ok(app.path().app_config_dir()?.join(SETTINGS_FILE))
 }
 

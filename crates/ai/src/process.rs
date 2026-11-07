@@ -1,7 +1,9 @@
 use std::ffi::OsStr;
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -20,6 +22,55 @@ pub(crate) fn hidden_command(program: impl AsRef<OsStr>) -> Command {
         command.creation_flags(CREATE_NO_WINDOW);
     }
     command
+}
+
+// Returns whether the command succeeded, or None if it was stopped or ran too long.
+pub(crate) fn run_lines(
+    binary: &Path,
+    arguments: &[&str],
+    limit: Duration,
+    stop: &AtomicBool,
+    mut on_line: impl FnMut(&str),
+) -> Option<bool> {
+    let mut child = hidden_command(binary)
+        .args(arguments)
+        .current_dir(std::env::temp_dir())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let stdout = child.stdout.take()?;
+    let (sender, lines) = mpsc::channel();
+    thread::spawn(move || {
+        for line in BufReader::new(stdout)
+            .lines()
+            .map_while(std::io::Result::ok)
+        {
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    let deadline = Instant::now() + limit;
+    loop {
+        match lines.recv_timeout(POLL_INTERVAL) {
+            Ok(line) => on_line(&line),
+            Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Timeout) => {
+                if child.try_wait().ok()?.is_some() {
+                    break;
+                }
+            }
+        }
+        if stop.load(Ordering::Relaxed) || Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+    }
+    child.wait().ok().map(|status| status.success())
 }
 
 pub(crate) fn run(binary: &Path, arguments: &[&str], timeout: Duration) -> Option<Output> {

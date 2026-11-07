@@ -26,23 +26,23 @@ export function DataView({ table }: { table: OpenedTable }) {
   const note = repairNote(table)
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-w-0 flex-1 flex-col">
       <h1 className="sr-only">{table.name}</h1>
-      <DataTable
-        key={table.source.path}
-        table={table}
-        onVisibleRowsChange={showVisibleRows}
-      />
+      <DataTable table={table} onVisibleRowsChange={showVisibleRows} />
       <footer className="flex h-7 shrink-0 items-center gap-2.5 border-t pr-3 pl-2 text-xs text-subtle tabular-nums">
         <Badge className="bg-primary/15 text-primary uppercase">
           {table.source.format}
         </Badge>
-        <span>
+        <span className="shrink-0">
           {table.rowCount.toLocaleString()} rows, {table.columns.length} columns
         </span>
-        {note && <span role="status">{note}</span>}
+        {note && (
+          <span role="status" className="truncate">
+            {note}
+          </span>
+        )}
         {table.rowCount > 0 && (
-          <span className="ml-auto">
+          <span className="ml-auto shrink-0">
             {visible.first.toLocaleString()} to {visible.last.toLocaleString()}
           </span>
         )}

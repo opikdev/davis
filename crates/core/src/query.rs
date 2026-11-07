@@ -1,0 +1,380 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, mpsc};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use duckdb::{Connection, params};
+use serde::Serialize;
+use serde_json::Value;
+
+use crate::table::{Column, Row, TableSource, connect, kind_of, quoted, scan};
+use crate::{Error, Result};
+
+const MAX_RESULT_ROWS: usize = 1_000;
+const QUERY_TIME_LIMIT: Duration = Duration::from_secs(60);
+const STOP_CHECK: Duration = Duration::from_millis(50);
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryResult {
+    pub columns: Vec<Column>,
+    pub rows: Vec<Row>,
+    pub is_truncated: bool,
+}
+
+pub fn run_query(source: &TableSource, sql: &str, stop: Arc<AtomicBool>) -> Result<QueryResult> {
+    run_query_within(source, sql, QUERY_TIME_LIMIT, stop)
+}
+
+fn run_query_within(
+    source: &TableSource,
+    sql: &str,
+    limit: Duration,
+    stop: Arc<AtomicBool>,
+) -> Result<QueryResult> {
+    let connection = locked_connection(source)?;
+    let sql = sql.trim().trim_end_matches(';').trim();
+    require_one_select(&connection, sql)?;
+
+    let (finished, wait) = mpsc::channel::<()>();
+    let interrupt = connection.interrupt_handle();
+    let deadline = Instant::now() + limit;
+    let watched = stop.clone();
+    thread::spawn(move || {
+        while wait.recv_timeout(STOP_CHECK) == Err(mpsc::RecvTimeoutError::Timeout) {
+            if watched.load(Ordering::Relaxed) || Instant::now() >= deadline {
+                interrupt.interrupt();
+                return;
+            }
+        }
+    });
+    let result = read_result(&connection, sql);
+    drop(finished);
+    result.map_err(|error| {
+        if stop.load(Ordering::Relaxed) {
+            Error::StoppedQuery
+        } else {
+            explain_failure(error)
+        }
+    })
+}
+
+// The view is created before lockdown because lockdown can't be undone. The file
+// stays writable through `allowed_paths`, so `require_one_select` is what protects it.
+fn locked_connection(source: &TableSource) -> Result<Connection> {
+    let connection = connect()?;
+    connection.execute_batch(&format!(
+        "CREATE VIEW data AS SELECT * FROM {};
+         SET allowed_paths = [{}];
+         SET enable_external_access = false;
+         SET lock_configuration = true;",
+        scan(source, false),
+        quoted(&source.path),
+    ))?;
+    Ok(connection)
+}
+
+fn require_one_select(connection: &Connection, sql: &str) -> Result<()> {
+    let serialized: String = connection.query_row(
+        "SELECT json_serialize_sql(?)::VARCHAR",
+        params![sql],
+        |row| row.get(0),
+    )?;
+    let parsed: Value = serde_json::from_str(&serialized).map_err(|_| Error::RejectedQuery)?;
+    let statements = parsed["statements"].as_array().map_or(0, Vec::len);
+    if parsed["error"] == Value::Bool(true) {
+        let is_syntax = parsed["error_type"] == "parser";
+        return Err(if is_syntax {
+            Error::InvalidQuery(parsed["error_message"].as_str().unwrap_or("").to_owned())
+        } else {
+            Error::RejectedQuery
+        });
+    }
+    if statements == 1 {
+        Ok(())
+    } else {
+        Err(Error::RejectedQuery)
+    }
+}
+
+fn read_result(connection: &Connection, sql: &str) -> Result<QueryResult> {
+    let columns = read_columns(connection, sql)?;
+    let mut statement = connection.prepare(&format!(
+        "SELECT COLUMNS(*)::VARCHAR FROM ({sql}) LIMIT {}",
+        MAX_RESULT_ROWS + 1
+    ))?;
+    let mut rows = statement.query([])?;
+    let mut read = Vec::new();
+    while let Some(row) = rows.next()? {
+        let values = (0..columns.len())
+            .map(|index| row.get(index))
+            .collect::<duckdb::Result<Row>>()?;
+        read.push(values);
+    }
+    let is_truncated = read.len() > MAX_RESULT_ROWS;
+    read.truncate(MAX_RESULT_ROWS);
+    Ok(QueryResult {
+        columns,
+        rows: read,
+        is_truncated,
+    })
+}
+
+fn read_columns(connection: &Connection, sql: &str) -> Result<Vec<Column>> {
+    let mut statement = connection.prepare(&format!("DESCRIBE SELECT * FROM ({sql})"))?;
+    let columns = statement
+        .query_map([], |row| {
+            let data_type: String = row.get(1)?;
+            Ok(Column {
+                name: row.get(0)?,
+                kind: kind_of(&data_type),
+                data_type,
+            })
+        })?
+        .collect::<duckdb::Result<_>>()?;
+    Ok(columns)
+}
+
+// Only mistakes about the query go back to the AI. Other errors can quote file contents.
+fn explain_failure(error: Error) -> Error {
+    let Error::Duckdb(failure) = &error else {
+        return error;
+    };
+    let message = failure.to_string();
+    if ["Binder Error", "Parser Error", "Catalog Error"]
+        .iter()
+        .any(|kind| message.starts_with(kind))
+    {
+        return Error::InvalidQuery(message);
+    }
+    if message.contains("INTERRUPT") || message.contains("Interrupted") {
+        return Error::SlowQuery;
+    }
+    eprintln!("Query failed: {message}");
+    Error::FailedQuery
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+
+    use super::*;
+    use crate::table::open_table;
+
+    struct Folder(PathBuf);
+
+    impl Folder {
+        fn new(name: &str) -> Self {
+            let path =
+                std::env::temp_dir().join(format!("davis-query-{}-{name}", std::process::id()));
+            fs::create_dir_all(&path).unwrap();
+            Self(path)
+        }
+
+        fn write(&self, name: &str, content: &str) -> String {
+            let path = self.0.join(name);
+            fs::write(&path, content).unwrap();
+            path.to_string_lossy().into_owned()
+        }
+    }
+
+    impl Drop for Folder {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    const SALES: &str = "region,amount\nEMEA,10\nEMEA,5\nAPAC,20\n";
+
+    fn sales(folder: &Folder) -> (String, TableSource) {
+        let path = folder.write("sales.csv", SALES);
+        let source = open_table(&path).unwrap().source;
+        (path, source)
+    }
+
+    fn ask(source: &TableSource, sql: &str) -> Result<QueryResult> {
+        run_query(source, sql, Arc::new(AtomicBool::new(false)))
+    }
+
+    fn code(source: &TableSource, sql: &str) -> &'static str {
+        ask(source, sql).unwrap_err().code()
+    }
+
+    fn cells(values: &[&str]) -> Row {
+        values
+            .iter()
+            .map(|value| Some((*value).to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn answers_a_question_about_the_table() {
+        let folder = Folder::new("answer");
+        let (_, source) = sales(&folder);
+
+        let result = ask(
+            &source,
+            "SELECT region, sum(amount) AS total FROM data GROUP BY 1 ORDER BY total DESC;",
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.rows,
+            [cells(&["APAC", "20"]), cells(&["EMEA", "15"])]
+        );
+        assert_eq!(result.columns[0].name, "region");
+        assert_eq!(result.columns[1].kind, crate::ColumnKind::Number);
+        assert!(!result.is_truncated);
+    }
+
+    #[test]
+    fn accepts_common_table_expressions() {
+        let folder = Folder::new("cte");
+        let (_, source) = sales(&folder);
+
+        let result = ask(
+            &source,
+            "WITH t AS (SELECT count(*) AS n FROM data) SELECT n FROM t",
+        )
+        .unwrap();
+
+        assert_eq!(result.rows, [cells(&["3"])]);
+    }
+
+    #[test]
+    fn caps_large_results() {
+        let folder = Folder::new("cap");
+        let (_, source) = sales(&folder);
+
+        let result = ask(&source, "SELECT * FROM range(5000)").unwrap();
+
+        assert_eq!(result.rows.len(), MAX_RESULT_ROWS);
+        assert!(result.is_truncated);
+    }
+
+    #[test]
+    fn nothing_can_change_the_users_file() {
+        let folder = Folder::new("protect");
+        let (path, source) = sales(&folder);
+        let attempts = [
+            format!("COPY (SELECT 1) TO {} (FORMAT csv)", quoted(&path)),
+            format!(
+                "COPY (SELECT 1) TO {} (FORMAT csv, USE_TMP_FILE false)",
+                quoted(&path)
+            ),
+            format!(
+                "SELECT 1; COPY (SELECT 1) TO {} (FORMAT csv, USE_TMP_FILE false)",
+                quoted(&path)
+            ),
+            format!(
+                "SELECT * FROM query('COPY (SELECT 1) TO {} (FORMAT csv, USE_TMP_FILE false)')",
+                quoted(&path).replace('\'', "''")
+            ),
+            format!(
+                "SELECT 1); COPY (SELECT 1) TO {} (FORMAT csv, USE_TMP_FILE false); SELECT * FROM (SELECT 1",
+                quoted(&path)
+            ),
+        ];
+
+        for sql in &attempts {
+            let outcome = ask(&source, sql);
+            assert!(outcome.is_err(), "{sql} should fail");
+        }
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), SALES);
+    }
+
+    #[test]
+    fn refuses_anything_but_one_read_query() {
+        let folder = Folder::new("refuse");
+        let (_, source) = sales(&folder);
+
+        for sql in [
+            "DROP VIEW data",
+            "CREATE TABLE t AS SELECT 1",
+            "INSERT INTO data VALUES ('x', 1)",
+            "ATTACH 'x.db'",
+            "INSTALL httpfs",
+            "SET threads = 1",
+            "SELECT 1; SELECT 2",
+        ] {
+            assert_eq!(code(&source, sql), "rejected-query", "{sql}");
+        }
+    }
+
+    #[test]
+    fn a_query_cannot_reach_other_files_or_the_network() {
+        let folder = Folder::new("reach");
+        let (_, source) = sales(&folder);
+        let other = folder.write("private.csv", "secret\n1\n");
+
+        for sql in [
+            format!("SELECT * FROM read_csv({})", quoted(&other)),
+            "SELECT * FROM read_csv('/etc/passwd')".to_owned(),
+            "SELECT * FROM read_csv('https://example.com/a.csv')".to_owned(),
+            "SELECT * FROM glob('/etc/*')".to_owned(),
+        ] {
+            assert!(ask(&source, &sql).is_err(), "{sql} should fail");
+        }
+    }
+
+    #[test]
+    fn a_wrong_column_can_be_sent_back_to_the_ai() {
+        let folder = Folder::new("wrong");
+        let (_, source) = sales(&folder);
+
+        assert_eq!(code(&source, "SELECT nope FROM data"), "invalid-query");
+        assert_eq!(code(&source, "SELEC 1"), "invalid-query");
+    }
+
+    #[test]
+    fn a_value_problem_stays_on_this_computer() {
+        let folder = Folder::new("value");
+        let lines: String = (0..40_000).map(|row| format!("{row}\n")).collect();
+        let path = folder.write("mixed.csv", &format!("a\n{lines}private-text\n"));
+        let source = open_table(&path).unwrap().source;
+
+        let error = ask(&source, "SELECT sum(a) FROM data").unwrap_err();
+
+        assert_eq!(error.code(), "failed-query");
+        assert!(!error.to_string().contains("private-text"));
+    }
+
+    #[test]
+    fn a_running_query_can_be_stopped() {
+        let folder = Folder::new("stop");
+        let (_, source) = sales(&folder);
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopper = stop.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            stopper.store(true, Ordering::Relaxed);
+        });
+
+        let error = run_query(
+            &source,
+            "SELECT count(*) FROM range(10000000000) a, range(1000) b WHERE a.range % 7 = b.range",
+            stop,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code(), "stopped");
+    }
+
+    #[test]
+    fn stops_a_query_that_runs_too_long() {
+        let folder = Folder::new("slow");
+        let (_, source) = sales(&folder);
+
+        let error = run_query_within(
+            &source,
+            "SELECT count(*) FROM range(10000000000) a, range(1000) b WHERE a.range % 7 = b.range",
+            Duration::from_millis(50),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code(), "slow-query");
+    }
+}
