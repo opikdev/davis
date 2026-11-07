@@ -541,15 +541,22 @@ mod tests {
     }
 
     #[test]
-    fn a_wildcard_in_a_name_does_not_read_neighbouring_files() {
-        let folder = Folder::new("wildcards");
-        let star = folder.write("sales*.csv", "a\n1\n");
-        folder.write("sales1.csv", "a\n2\n3\n");
+    fn brackets_in_a_name_do_not_read_neighbouring_files() {
+        let folder = Folder::new("brackets");
         let bracket = folder.write("report[1].csv", "a\n1\n");
         folder.write("report1.csv", "a\n2\n3\n");
 
-        assert_eq!(open_table(&star).unwrap().row_count, 1);
         assert_eq!(open_table(&bracket).unwrap().row_count, 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_star_in_a_name_does_not_read_neighbouring_files() {
+        let folder = Folder::new("stars");
+        let star = folder.write("sales*.csv", "a\n1\n");
+        folder.write("sales1.csv", "a\n2\n3\n");
+
+        assert_eq!(open_table(&star).unwrap().row_count, 1);
     }
 
     #[test]
