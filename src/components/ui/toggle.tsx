@@ -12,7 +12,7 @@ const toggleVariants = cva(
       },
       size: {
         default:
-          "h-7 min-w-7 px-1.5 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5",
+          "h-6 min-w-6 px-1 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5",
         sm: "h-6 min-w-6 rounded-[min(var(--radius-md),8px)] px-2 text-[0.625rem] has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
         lg: "h-8 min-w-8 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
       },

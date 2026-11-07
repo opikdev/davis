@@ -26,11 +26,11 @@ export function StepLayout({
   }, [])
 
   return (
-    <div data-tauri-drag-region className="flex h-svh flex-col p-1">
+    <div data-tauri-drag-region className="flex h-svh flex-col p-1.5">
       <div className="flex min-h-0 flex-1 flex-col rounded-xl border bg-background">
         <TitleBar label={stepLabel} />
         <div className="flex min-h-0 flex-1 items-center justify-center px-6 pb-6">
-          <div className="flex h-full max-h-160 w-full max-w-md flex-col">
+          <div className="flex h-full max-h-150 w-full max-w-sm flex-col">
             <main className="-mx-3 no-scrollbar flex min-h-0 flex-1 scroll-fade flex-col overflow-y-auto px-3 pt-6 pb-14 scroll-fade-b-14 scroll-fade-t-6">
               <div className="flex min-h-0 flex-1 animate-stagger flex-col gap-6">
                 <div className="flex flex-col gap-2">

@@ -68,11 +68,11 @@ function ProviderRail({ providers, shownId, onShow }: ProviderRailProps) {
               <ToggleGroupItem
                 value={provider.id}
                 aria-label={provider.name}
-                className="size-8 p-0 text-muted-foreground aria-pressed:text-foreground"
+                className="size-7 p-0 text-muted-foreground aria-pressed:text-foreground"
               />
             }
           >
-            <BrandIcon icon={provider.icon} className="size-4" />
+            <BrandIcon icon={provider.icon} className="size-3.5" />
           </TooltipTrigger>
           <TooltipContent side="right">{provider.name}</TooltipContent>
         </Tooltip>
@@ -123,7 +123,7 @@ function ModelList({
         className="flex flex-1 flex-col gap-2 p-3"
       >
         {[0, 1, 2, 3].map((row) => (
-          <Skeleton key={row} className="h-8 w-full" />
+          <Skeleton key={row} className="h-7 w-full" />
         ))}
       </div>
     )
@@ -148,7 +148,7 @@ function ModelList({
             data-checked={model.id === chosenId}
             onSelect={() => onPick(model)}
           >
-            <BrandIcon icon={provider.icon} className="size-4" />
+            <BrandIcon icon={provider.icon} className="size-3.5" />
             <span className="truncate">{model.name}</span>
           </CommandItem>
         ))}
@@ -167,7 +167,7 @@ function EffortList({ model, effort, onPick }: EffortListProps) {
   const efforts = model?.efforts ?? []
 
   return (
-    <div className="flex w-40 shrink-0 flex-col gap-2 border-l p-2.5">
+    <div className="flex w-36 shrink-0 flex-col gap-1.5 border-l p-2">
       <p className="px-1 text-xs font-medium text-muted-foreground">Effort</p>
       {efforts.length === 0 ? (
         <p className="px-1 text-xs/relaxed text-muted-foreground">
@@ -191,7 +191,7 @@ function EffortList({ model, effort, onPick }: EffortListProps) {
                 event.preventDefault()
                 onPick(level)
               }}
-              className="group/effort relative h-8 gap-2.5 rounded-md px-2 font-normal text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground has-focus-visible:ring-2 has-focus-visible:ring-ring/40 has-data-checked:bg-muted has-data-checked:text-foreground"
+              className="group/effort relative h-7 gap-2 rounded-md px-2 font-normal text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground has-focus-visible:ring-2 has-focus-visible:ring-ring/40 has-data-checked:bg-muted has-data-checked:text-foreground"
             >
               <RadioGroupItem value={level} className="absolute opacity-0" />
               <EffortMeter
@@ -294,7 +294,7 @@ export function ModelPicker() {
           />
         }
       >
-        <BrandIcon icon={activeProvider.icon} className="size-4" />
+        <BrandIcon icon={activeProvider.icon} className="size-3.5" />
         <span className="truncate">
           {current?.modelName ?? activeProvider.name}
         </span>
@@ -313,7 +313,7 @@ export function ModelPicker() {
         <HugeiconsIcon
           icon={ArrowDown01Icon}
           strokeWidth={1.5}
-          className="size-4 text-muted-foreground"
+          className="size-3.5 text-muted-foreground"
         />
       </PopoverTrigger>
       <PopoverContent
@@ -321,7 +321,7 @@ export function ModelPicker() {
         side="bottom"
         align="end"
         sideOffset={6}
-        className="h-80 w-128 flex-row gap-0 overflow-hidden p-0 shadow-2xl"
+        className="h-72 w-110 flex-row gap-0 overflow-hidden p-0 shadow-2xl"
       >
         {providers.length > 1 && (
           <ProviderRail

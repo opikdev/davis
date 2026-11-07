@@ -16,13 +16,13 @@ export function EffortMeter({ level, total, className }: EffortMeterProps) {
   return (
     <span
       aria-hidden="true"
-      className={cn("flex h-3.5 shrink-0 items-end gap-[2px]", className)}
+      className={cn("flex h-3 shrink-0 items-end gap-[2px]", className)}
     >
       {Array.from({ length: total }, (_, index) => (
         <span
           key={index}
           className={cn(
-            "w-[3px] rounded-full bg-current transition-opacity",
+            "w-[2px] rounded-full bg-current transition-opacity",
             index >= level && "opacity-25"
           )}
           style={{ height: `${((index + 2) / (total + 1)) * 100}%` }}

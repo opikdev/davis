@@ -21,10 +21,10 @@ const buttonVariants = cva(
       },
       size: {
         default:
-          "h-8 gap-1.5 px-3 has-data-[icon=inline-end]:pr-2.5 has-data-[icon=inline-start]:pl-2.5 [&_svg:not([class*='size-'])]:size-4",
-        sm: "h-7 gap-1 rounded-md px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2 [&_svg:not([class*='size-'])]:size-4",
-        icon: "size-8 [&_svg:not([class*='size-'])]:size-4",
-        "icon-sm": "size-7 [&_svg:not([class*='size-'])]:size-4",
+          "h-7 gap-1.5 px-2.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2 [&_svg:not([class*='size-'])]:size-3.5",
+        sm: "h-6 gap-1 rounded-md px-2 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
+        icon: "size-7 [&_svg:not([class*='size-'])]:size-3.5",
+        "icon-sm": "size-6 [&_svg:not([class*='size-'])]:size-3.5",
       },
     },
     defaultVariants: {
