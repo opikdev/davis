@@ -178,7 +178,14 @@ export function AppSidebar({
                       isActive={chat.id === activeChat}
                       onClick={() => onOpenChat(chat)}
                     >
-                      <HugeiconsIcon icon={Message01Icon} strokeWidth={1.5} />
+                      {isBusy && chat.id === activeChat ? (
+                        <span
+                          aria-label="Working"
+                          className="mx-1 size-1.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none"
+                        />
+                      ) : (
+                        <HugeiconsIcon icon={Message01Icon} strokeWidth={1.5} />
+                      )}
                       <span className="truncate">{chat.title}</span>
                     </SidebarMenuButton>
                     <SidebarMenuAction

@@ -120,10 +120,15 @@ export function useChat(
   const [chatId, setChatId] = useState<string>()
   const [saveError, setSaveError] = useState<string>()
   const savedTurns = useRef(turns)
+  const latestTurns = useRef(turns)
   const lastSave = useRef(0)
   const nextId = useRef(1)
   const activeId = turns.find((turn) => !turn.finishedAt)?.id
   const isAsking = activeId !== undefined
+
+  useEffect(() => {
+    latestTurns.current = turns
+  }, [turns])
 
   useEffect(() => {
     if (!project || !chatId) return
@@ -172,7 +177,7 @@ export function useChat(
   const run = useCallback(
     async (id: number, question: string) => {
       if (!project) return
-      const history = turns.flatMap((turn) =>
+      const history = latestTurns.current.flatMap((turn) =>
         turn.id === id ? [] : pastTurn(turn)
       )
       try {
@@ -206,7 +211,7 @@ export function useChat(
         }))
       }
     },
-    [buffer, project, table?.name, turns, update]
+    [buffer, project, table?.name, update]
   )
 
   const ask = useCallback(
@@ -227,6 +232,7 @@ export function useChat(
     (turn: Turn) => {
       update(turn.id, () => ({
         steps: [],
+        answer: undefined,
         error: undefined,
         isStopped: false,
         finishedAt: undefined,

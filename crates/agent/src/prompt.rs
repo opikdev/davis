@@ -29,7 +29,9 @@ other marks.
 query q1, row 0 (the first), column trips. Davis fills in the real value.
 - When a sentence says something rose or fell, reference a positive amount, using abs() in the \
 query, so it never reads \"fell by -5\".
-- If the data can't answer the question, say why plainly.";
+- If the data can't answer the question, say why plainly.
+- End with up to three follow-up questions the person might ask next, each on its own line \
+starting with \"? \". Base them on what you found.";
 
 pub struct ProjectTable {
     pub name: String,

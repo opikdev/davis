@@ -17,6 +17,7 @@ use crate::{AgentError, Result};
 
 const MAX_TITLE_CHARACTERS: usize = 80;
 const EXTRA_MODEL_TURNS: u32 = 6;
+const MAX_FOLLOW_UPS: usize = 3;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,6 +79,7 @@ pub struct AgentAnswer {
     pub text: String,
     pub figures: Vec<Figure>,
     pub queries: BTreeMap<String, StoredQuery>,
+    pub follow_ups: Vec<String>,
 }
 
 impl AgentAnswer {
@@ -87,8 +89,23 @@ impl AgentAnswer {
             text: String::new(),
             figures: Vec::new(),
             queries: BTreeMap::new(),
+            follow_ups: Vec::new(),
         }
     }
+}
+
+fn split_follow_ups(reply: &str) -> (&str, Vec<String>) {
+    let mut body = reply.trim_end();
+    let mut follow_ups = Vec::new();
+    while let Some((before, last)) = body.rsplit_once('\n') {
+        let Some(question) = last.trim().strip_prefix("? ") else {
+            break;
+        };
+        follow_ups.insert(0, question.trim().to_owned());
+        body = before.trim_end();
+    }
+    follow_ups.truncate(MAX_FOLLOW_UPS);
+    (body, follow_ups)
 }
 
 fn split_title(reply: &str, fallback: &str) -> (String, String) {
@@ -176,12 +193,14 @@ fn finished_answer(reply: &str, findings: Findings) -> AgentAnswer {
         .figures
         .first()
         .map_or("", |figure| figure.title.as_str());
-    let (title, text) = split_title(reply, fallback);
+    let (body, follow_ups) = split_follow_ups(reply);
+    let (title, text) = split_title(body, fallback);
     AgentAnswer {
         title,
         text,
         figures: findings.figures,
         queries: findings.queries,
+        follow_ups,
     }
 }
 
@@ -211,6 +230,32 @@ mod tests {
         );
         let long = format!("{}\nmore", "x".repeat(100));
         assert_eq!(split_title(&long, "Fallback").1, long);
+    }
+
+    #[test]
+    fn follow_up_lines_are_taken_off_the_end_of_a_reply() {
+        let (body, follow_ups) =
+            split_follow_ups("Title\nIt fell.\n\n? Why in EMEA?\n? What about April? \n");
+
+        assert_eq!(body, "Title\nIt fell.");
+        assert_eq!(follow_ups, ["Why in EMEA?", "What about April?"]);
+    }
+
+    #[test]
+    fn question_marks_in_the_answer_stay_where_they_are() {
+        let reply = "Title\n? This line is part of the answer.\nThe end.";
+
+        let (body, follow_ups) = split_follow_ups(reply);
+
+        assert_eq!(body, reply);
+        assert!(follow_ups.is_empty());
+    }
+
+    #[test]
+    fn at_most_three_follow_ups_are_kept() {
+        let (_, follow_ups) = split_follow_ups("Title\n? 1\n? 2\n? 3\n? 4");
+
+        assert_eq!(follow_ups, ["1", "2", "3"]);
     }
 
     #[test]

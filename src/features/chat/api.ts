@@ -26,6 +26,7 @@ export type AgentAnswer = {
   text: string
   figures: Figure[]
   queries: Record<string, StoredQuery>
+  followUps?: string[]
 }
 
 export type PastTurn = {

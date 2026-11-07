@@ -9,7 +9,7 @@ import {
   Table01Icon,
 } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react"
-import { useEffect, useState } from "react"
+import { useCallback, useState } from "react"
 
 import {
   Collapsible,
@@ -21,6 +21,9 @@ import type { AskStep, StoredQuery, TimedStep, Turn } from "@/features/chat/api"
 import { withoutReferences } from "@/features/chat/references"
 import { cn } from "@/lib/utils"
 
+const TICK_MS = 1000
+const MINUTE = 60
+
 const KIND_ICONS: Record<AskStep["kind"], IconSvgElement> = {
   read: Table01Icon,
   think: AiBrain01Icon,
@@ -31,20 +34,28 @@ const KIND_ICONS: Record<AskStep["kind"], IconSvgElement> = {
   chart: ChartBarLineIcon,
 }
 
-function seconds(from: number, to: number) {
-  return `${Math.max(Math.round((to - from) / 1000), 1)}s`
+function duration(from: number, to: number) {
+  const seconds = Math.max(Math.round((to - from) / 1000), 1)
+  if (seconds < MINUTE) return `${seconds}s`
+  return `${Math.floor(seconds / MINUTE)}m ${seconds % MINUTE}s`
 }
 
-function useNow(isRunning: boolean) {
-  const [now, setNow] = useState(() => Date.now())
+function counted(count: number, unit: string) {
+  return `${count} ${unit}${count === 1 ? "" : "s"}`
+}
 
-  useEffect(() => {
-    if (!isRunning) return
-    const timer = setInterval(() => setNow(Date.now()), 250)
-    return () => clearInterval(timer)
-  }, [isRunning])
-
-  return now
+function workSummary(steps: TimedStep[]) {
+  const finished = ({ status }: TimedStep) => status === "done"
+  const queries = steps.filter(
+    (step) => step.kind === "run" && finished(step)
+  ).length
+  const views = steps.filter(
+    (step) => step.kind === "chart" && finished(step)
+  ).length
+  return [queries && counted(queries, "query"), views && counted(views, "view")]
+    .filter(Boolean)
+    .join(", ")
+    .replace("querys", "queries")
 }
 
 function WorkingBars() {
@@ -61,14 +72,6 @@ function WorkingBars() {
   )
 }
 
-function NoteRow({ step }: { step: TimedStep }) {
-  return (
-    <p className="py-0.5 pl-5 text-xs/relaxed text-muted-foreground select-text">
-      {withoutReferences(step.body ?? "")}
-    </p>
-  )
-}
-
 function WhatTheAiSaw({ rows, query }: { rows: number; query?: StoredQuery }) {
   const unit = rows === 1 ? "row" : "rows"
   return (
@@ -81,18 +84,19 @@ function WhatTheAiSaw({ rows, query }: { rows: number; query?: StoredQuery }) {
   )
 }
 
-function stepLabel(step: TimedStep) {
-  if (step.kind !== "think" || step.status === "running") return step.label
-  return `Thought for ${seconds(step.startedAt, step.finishedAt ?? step.startedAt)}`
-}
-
 type StepRowProps = {
   step: TimedStep
   queries?: Record<string, StoredQuery>
 }
 
 function StepRow({ step, queries }: StepRowProps) {
-  if (step.kind === "note") return <NoteRow step={step} />
+  if (step.kind === "note") {
+    return (
+      <p className="py-0.5 pl-5 text-xs/relaxed text-muted-foreground select-text">
+        {withoutReferences(step.body ?? "")}
+      </p>
+    )
+  }
 
   const row = (
     <>
@@ -103,15 +107,16 @@ function StepRow({ step, queries }: StepRowProps) {
       />
       <span
         className={cn(
-          "shrink-0",
-          step.status === "running" && "text-foreground",
-          step.status === "failed" && "text-destructive"
+          "min-w-0 truncate",
+          step.status === "running" && "text-foreground"
         )}
       >
-        {stepLabel(step)}
+        {step.label}
       </span>
       {step.detail && (
-        <span className="min-w-0 truncate text-subtle">{step.detail}</span>
+        <span className="ml-auto shrink-0 truncate pl-1 text-subtle">
+          {step.detail}
+        </span>
       )}
     </>
   )
@@ -125,17 +130,10 @@ function StepRow({ step, queries }: StepRowProps) {
       <CollapsibleTrigger
         className={cn(
           rowClass,
-          "group/step rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
+          "rounded-sm outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40"
         )}
       >
         {row}
-        {step.status !== "running" && (
-          <HugeiconsIcon
-            icon={ArrowRight01Icon}
-            strokeWidth={1.5}
-            className="ml-auto size-3 shrink-0 text-subtle transition-transform group-data-panel-open/step:rotate-90"
-          />
-        )}
       </CollapsibleTrigger>
       <CollapsibleContent>
         <pre className="mt-0.5 mb-1 ml-5 rounded-md border bg-sidebar px-2 py-1.5 font-mono text-[0.6875rem]/relaxed break-words whitespace-pre-wrap text-muted-foreground select-text">
@@ -152,63 +150,112 @@ function StepRow({ step, queries }: StepRowProps) {
   )
 }
 
-function WorkingStatus({ turn }: { turn: Turn }) {
-  const now = useNow(true)
-  const current = turn.steps.findLast(
-    ({ kind, status }) => status === "running" && kind !== "note"
+// The timer writes to the page directly, so ticking never re-renders the chat.
+function useElapsedText(startedAt: number) {
+  return useCallback(
+    (node: HTMLElement | null) => {
+      if (!node) return
+      const write = () => {
+        node.textContent = `Working for ${duration(startedAt, Date.now())}`
+      }
+      write()
+      const timer = setInterval(write, TICK_MS)
+      return () => clearInterval(timer)
+    },
+    [startedAt]
   )
-  const label =
-    current?.kind === "question"
-      ? "Waiting for your reply"
-      : (current?.label ?? "Working")
+}
+
+function Chevron({ className }: { className?: string }) {
+  return (
+    <HugeiconsIcon
+      icon={ArrowRight01Icon}
+      strokeWidth={1.5}
+      className={cn("size-3 shrink-0 transition-transform", className)}
+    />
+  )
+}
+
+function WorkingActivity({ turn }: { turn: Turn }) {
+  const [isOpen, setIsOpen] = useState(false)
+  const elapsed = useElapsedText(turn.startedAt)
+  const isWaiting = turn.steps.some(
+    ({ kind, status }) => kind === "question" && status === "running"
+  )
+  const log = turn.steps.filter(
+    ({ kind, status }) =>
+      status !== "running" || (kind !== "note" && kind !== "question")
+  )
+  const latest = log.findLast(({ kind }) => kind !== "note")
+  const streaming = turn.steps.findLast(
+    ({ kind, status }) => kind === "note" && status === "running"
+  )
 
   return (
-    <div
-      role="status"
-      className="flex h-6 items-center gap-2 text-xs text-muted-foreground"
-    >
-      <WorkingBars />
-      <span className="truncate">{label}</span>
-      <span className="ml-auto text-subtle tabular-nums">
-        {seconds(turn.startedAt, now)}
-      </span>
+    <div className="flex animate-fade flex-col">
+      <Collapsible open={isOpen} onOpenChange={setIsOpen}>
+        <CollapsibleTrigger className="group/working flex h-6 w-full items-center gap-2 rounded-sm text-left text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40">
+          <WorkingBars />
+          {isWaiting ? (
+            <span>Waiting for your reply</span>
+          ) : (
+            <span ref={elapsed} className="tabular-nums" />
+          )}
+          <Chevron className="group-data-panel-open/working:rotate-90" />
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <div className="mt-0.5 flex flex-col border-l pl-2">
+            {log.map((step) => (
+              <StepRow key={step.id} step={step} />
+            ))}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+      {!isOpen && latest && (
+        <div role="status" className="pl-2">
+          <StepRow key={latest.id} step={latest} />
+        </div>
+      )}
+      {streaming?.body && (
+        <p className="mt-1 leading-relaxed whitespace-pre-wrap text-foreground select-text">
+          {withoutReferences(streaming.body)}
+        </p>
+      )}
     </div>
   )
 }
 
-export function Activity({ turn }: { turn: Turn }) {
-  const isWorking = !turn.finishedAt
+function finishedLabel(turn: Turn) {
+  const time = duration(turn.startedAt, turn.finishedAt ?? turn.startedAt)
+  if (turn.isStopped) {
+    return turn.steps.length > 0
+      ? `You stopped after ${time}`
+      : "You stopped this"
+  }
+  return [`Worked for ${time}`, workSummary(turn.steps)]
+    .filter(Boolean)
+    .join(" · ")
+}
 
-  if (isWorking) {
-    return (
-      <div className="flex animate-fade flex-col">
-        {turn.steps
-          .filter(
-            ({ kind, status }) => kind !== "question" || status !== "running"
-          )
-          .map((step) => (
-            <StepRow key={step.id} step={step} />
-          ))}
-        <WorkingStatus turn={turn} />
-      </div>
-    )
+export function Activity({ turn }: { turn: Turn }) {
+  if (!turn.finishedAt) return <WorkingActivity turn={turn} />
+
+  const log = turn.steps.filter(({ kind, body }) => kind !== "think" || body)
+  if (log.length === 0) {
+    return turn.isStopped ? (
+      <p className="h-6 text-xs/6 text-subtle">{finishedLabel(turn)}</p>
+    ) : null
   }
 
-  if (turn.steps.length === 0) return null
-
   return (
-    <Collapsible>
+    <Collapsible defaultOpen={Boolean(turn.error)}>
       <CollapsibleTrigger className="group/worked flex h-6 items-center gap-1 rounded-sm text-xs text-subtle outline-none hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring/40">
-        <HugeiconsIcon
-          icon={ArrowRight01Icon}
-          strokeWidth={1.5}
-          className="size-3 transition-transform group-data-panel-open/worked:rotate-90"
-        />
-        Worked for {seconds(turn.startedAt, turn.finishedAt ?? turn.startedAt)}
+        <Chevron className="group-data-panel-open/worked:rotate-90" />
+        {finishedLabel(turn)}
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className="mt-0.5 flex flex-col border-l pl-2">
-          {turn.steps.map((step) => (
+          {log.map((step) => (
             <StepRow key={step.id} step={step} queries={turn.answer?.queries} />
           ))}
         </div>

@@ -19,6 +19,7 @@ davis-core = { path = "../crates/core" }
 davis-project = { path = "../crates/project" }
 serde.workspace = true
 tauri = { version = "2.12.5", features = [] }
+tauri-plugin-clipboard-manager = "2"
 tauri-plugin-dialog = "2.8.4"
 tauri-plugin-opener = "2.7.2"
 thiserror.workspace = true

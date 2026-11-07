@@ -109,6 +109,7 @@ fn answer_from(plan: QueryPlan, sql: String, result: QueryResult, send: SendStep
         queries: BTreeMap::from([(QUERY_ID.to_owned(), StoredQuery { sql, result })]),
         title: plan.title,
         text: String::new(),
+        follow_ups: Vec::new(),
     }
 }
 

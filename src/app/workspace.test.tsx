@@ -21,6 +21,7 @@ const drops = vi.hoisted(() => ({
   send: (() => {}) as (event: unknown) => void,
 }))
 const chooseFile = vi.hoisted(() => vi.fn())
+const writeText = vi.hoisted(() => vi.fn())
 
 // The panel library measures real layout, which jsdom doesn't have.
 vi.mock("@/components/ui/resizable", () => ({
@@ -34,6 +35,7 @@ vi.mock("@/components/ui/resizable", () => ({
 }))
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: chooseFile }))
+vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText }))
 
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({
@@ -445,52 +447,195 @@ test("asking shows the answer, its rows, and the query", async () => {
   expect(screen.getByText("1500")).toBeTruthy()
 })
 
-test("the work is shown as it happens, then folds away", async () => {
+function emit(args: unknown, step: Record<string, unknown>) {
+  const { onStep } = args as { onStep: { onmessage: (s: unknown) => void } }
+  onStep.onmessage({ detail: null, body: null, ...step })
+}
+
+test("only the latest step shows while working, and all of them on request", async () => {
   await renderOpenTable((args) => {
-    const steps = (args as { onStep: { onmessage: (step: unknown) => void } })
-      .onStep
-    steps.onmessage({
+    emit(args, {
       id: "read",
       kind: "read",
       status: "done",
-      label: "Read columns",
-      detail: "2 names and types",
-      body: null,
+      label: "Read 2 tables",
     })
-    steps.onmessage({
-      id: "write-1",
-      kind: "write",
+    emit(args, {
+      id: "run-q1",
+      kind: "run",
       status: "running",
-      label: "Writing query",
-      detail: null,
+      label: "Compare regions",
       body: "SELECT region",
     })
-    return new Promise((resolve) =>
-      setTimeout(() => {
-        steps.onmessage({
-          id: "write-1",
-          kind: "write",
-          status: "done",
-          label: "Writing query",
-          detail: null,
-          body: SALES_SQL,
-        })
-        resolve(SALES_ANSWER)
-      }, 80)
-    )
+    return new Promise(() => {})
   })
 
   await askQuestion("Sales?")
 
-  expect(await screen.findByText("Read columns")).toBeTruthy()
-  expect(screen.getByText("SELECT region")).toBeTruthy()
-  expect(screen.getByRole("status").textContent).toContain("Writing query")
+  expect(await screen.findByText("Compare regions")).toBeTruthy()
+  expect(screen.queryByText("Read 2 tables")).toBeNull()
+  expect(screen.getByText(/^Working for /)).toBeTruthy()
 
+  await userEvent.click(screen.getByText(/^Working for /))
+
+  expect(await screen.findByText("Read 2 tables")).toBeTruthy()
+})
+
+test("the answer streams in while the AI writes it", async () => {
+  await renderOpenTable((args) => {
+    emit(args, {
+      id: "note-1",
+      kind: "note",
+      status: "running",
+      label: "Note",
+      body: "Sales rose by {{q1.0.total}}",
+    })
+    return new Promise(() => {})
+  })
+
+  await askQuestion("Sales?")
+
+  expect(await screen.findByText("Sales rose by …")).toBeTruthy()
+})
+
+test("finished work folds into a plain summary", async () => {
+  await renderOpenTable((args) => {
+    emit(args, {
+      id: "think-1",
+      kind: "think",
+      status: "done",
+      label: "Thinking",
+    })
+    emit(args, {
+      id: "run-q1",
+      kind: "run",
+      status: "done",
+      label: "Compare regions",
+      body: SALES_SQL,
+    })
+    emit(args, {
+      id: "run-q2",
+      kind: "run",
+      status: "done",
+      label: "Check totals",
+      body: SALES_SQL,
+    })
+    emit(args, { id: "show-1", kind: "chart", status: "done", label: "Totals" })
+    return SALES_ANSWER
+  })
+
+  await askQuestion("Sales?")
   await screen.findByRole("heading", { name: "Sales by region" })
-  expect(screen.queryByText("Read columns")).toBeNull()
 
-  await userEvent.click(screen.getByRole("button", { name: /Worked for/ }))
-  expect(await screen.findByText(SALES_SQL)).toBeTruthy()
+  const summary = await screen.findByRole("button", {
+    name: /^Worked for \d+s · 2 queries, 1 view$/,
+  })
+  expect(screen.queryByText("Compare regions")).toBeNull()
+
+  await userEvent.click(summary)
+
+  expect(await screen.findByText("Compare regions")).toBeTruthy()
+  expect(screen.queryByText("Thinking")).toBeNull()
+})
+
+test("work stays open when the turn fails", async () => {
+  const report = vi.spyOn(console, "error").mockImplementation(() => {})
+  await renderOpenTable((args) => {
+    emit(args, {
+      id: "run-q1",
+      kind: "run",
+      status: "failed",
+      label: "Compare regions",
+      body: SALES_SQL,
+    })
+    throw { kind: "ask-failed", message: "Claude Code couldn't answer." }
+  })
+
+  await askQuestion("Sales?")
+
+  expect(await screen.findByRole("alert")).toBeTruthy()
+  expect(await screen.findByText("Compare regions")).toBeTruthy()
+  report.mockRestore()
+})
+
+test("follow-up suggestions ask with one click, on the last answer only", async () => {
+  const ask = vi.fn<(args: unknown) => unknown>(() => ({
+    ...SALES_ANSWER,
+    followUps: ["Why is EMEA ahead?"],
+  }))
+  await renderOpenTable(ask)
+
+  await askQuestion("Sales?")
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Why is EMEA ahead?" })
+  )
+
+  await waitFor(() => expect(ask).toHaveBeenCalledTimes(2))
+  expect(ask.mock.calls[1][0]).toMatchObject({
+    request: { question: "Why is EMEA ahead?" },
+  })
+})
+
+test("an answer copies with its real numbers, not references", async () => {
+  await renderOpenTable(() => SALES_ANSWER)
+
+  await askQuestion("Sales?")
+  fireEvent.click(await screen.findByRole("button", { name: "Copy answer" }))
+
+  await waitFor(() =>
+    expect(writeText).toHaveBeenCalledWith(
+      `Sales by region\n\nEMEA leads with ${(1500).toLocaleString()}.`
+    )
+  )
+  expect(await screen.findByRole("button", { name: "Copied" })).toBeTruthy()
+})
+
+test("Ask again replaces the answer with a fresh one", async () => {
+  const ask = vi.fn<(args: unknown) => unknown>(() => SALES_ANSWER)
+  await renderOpenTable(ask)
+
+  await askQuestion("Sales?")
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Ask again" })
+  )
+
+  await waitFor(() => expect(ask).toHaveBeenCalledTimes(2))
+  expect(screen.getAllByRole("button", { name: "Ask again" })).toHaveLength(1)
+})
+
+test("number keys answer a question from the AI", async () => {
+  const onReply = vi.fn()
+  await renderOpenTable(askAndWait, undefined, { onReply })
+
+  await askQuestion("Sales?")
+  await screen.findByText("Which year?")
+  await userEvent.type(
+    screen.getByRole("textbox", { name: "Ask about this data" }),
+    "2"
+  )
+
+  expect(onReply).toHaveBeenCalledWith("2026")
+  expect(screen.getByRole("textbox")).toHaveProperty("value", "")
+})
+
+test("scrolling up stops following, and Jump to latest brings it back", async () => {
+  await renderOpenTable(() => SALES_ANSWER)
+  await askQuestion("Sales?")
+  await screen.findByRole("heading", { name: "Sales by region" })
+  const scroller = screen
+    .getByRole("heading", { name: "Sales by region" })
+    .closest(".overflow-y-auto") as HTMLElement
+  Object.defineProperty(scroller, "scrollHeight", { value: 2000 })
+  scroller.scrollTop = 900
+
+  fireEvent.wheel(scroller, { deltaY: -100 })
+
+  const jump = await screen.findByRole("button", { name: "Jump to latest" })
+  await userEvent.click(jump)
+
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull()
+  )
 })
 
 test("Stop ends the question and tells the app", async () => {
@@ -500,7 +645,7 @@ test("Stop ends the question and tells the app", async () => {
   await askQuestion("Sales?")
   await userEvent.click(await screen.findByRole("button", { name: "Stop" }))
 
-  expect(await screen.findByText("Stopped")).toBeTruthy()
+  expect(await screen.findByText("You stopped this")).toBeTruthy()
   expect(onStop).toHaveBeenCalledWith(1)
   expect(screen.getByRole("button", { name: "Send" })).toBeTruthy()
 })
@@ -512,7 +657,7 @@ test("A stopped question shows no error", async () => {
 
   await askQuestion("Sales?")
 
-  expect(await screen.findByText("Stopped")).toBeTruthy()
+  expect(await screen.findByText("You stopped this")).toBeTruthy()
   expect(screen.queryByRole("alert")).toBeNull()
 })
 

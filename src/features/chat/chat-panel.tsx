@@ -1,11 +1,16 @@
 import {
   AiChat02Icon,
+  ArrowDown02Icon,
   ArrowUp02Icon,
+  Copy01Icon,
   PencilEdit02Icon,
+  RepeatIcon,
   StopIcon,
+  Tick02Icon,
 } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
-import { useEffect, useRef, useState } from "react"
+import { writeText } from "@tauri-apps/plugin-clipboard-manager"
+import { memo, useCallback, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -17,9 +22,14 @@ import {
 import { ModelPicker } from "@/features/ai-setup"
 import { Activity } from "@/features/chat/activity"
 import { AnswerView } from "@/features/chat/answer-view"
-import type { Turn } from "@/features/chat/api"
+import type { AgentAnswer, Turn } from "@/features/chat/api"
+import { fillReferences } from "@/features/chat/references"
 import type { useChat } from "@/features/chat/use-chat"
+import { useFollow } from "@/features/chat/use-follow"
 import type { Column, OpenedTable } from "@/features/data"
+import { cn } from "@/lib/utils"
+
+const COPIED_MS = 1500
 
 function readable(name: string) {
   return name.replace(/[_-]+/g, " ").trim()
@@ -38,26 +48,101 @@ function suggestionsFor(columns: Column[]) {
   ].filter((suggestion) => suggestion !== undefined)
 }
 
-function TurnView({ turn, onRetry }: { turn: Turn; onRetry: () => void }) {
+function CopyButton({ text, label }: { text: string; label: string }) {
+  const [hasCopied, setHasCopied] = useState(false)
+
+  async function copy() {
+    await writeText(text)
+    setHasCopied(true)
+    setTimeout(() => setHasCopied(false), COPIED_MS)
+  }
+
   return (
-    <div className="flex flex-col gap-1.5">
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      aria-label={hasCopied ? "Copied" : label}
+      onClick={() => void copy()}
+    >
+      <HugeiconsIcon
+        icon={hasCopied ? Tick02Icon : Copy01Icon}
+        strokeWidth={1.5}
+      />
+    </Button>
+  )
+}
+
+function answerAsText({ title, text, queries }: AgentAnswer) {
+  return [title, fillReferences(text, queries)].filter(Boolean).join("\n\n")
+}
+
+type TurnViewProps = {
+  turn: Turn
+  isLast: boolean
+  onRetry: (turn: Turn) => void
+  onAsk: (question: string) => void
+}
+
+const TurnView = memo(function TurnView({
+  turn,
+  isLast,
+  onRetry,
+  onAsk,
+}: TurnViewProps) {
+  const { question, answer, error, finishedAt } = turn
+  const followUps = isLast ? (answer?.followUps ?? []) : []
+
+  return (
+    <div
+      className={cn(
+        "group/turn flex shrink-0 flex-col gap-1.5",
+        isLast && "min-h-[calc(100cqh-2rem)]"
+      )}
+    >
       <p className="mb-1 ml-6 w-fit self-end rounded-lg bg-muted px-2.5 py-1.5 select-text">
-        {turn.question}
+        {question}
       </p>
       <Activity turn={turn} />
-      {turn.answer && <AnswerView answer={turn.answer} />}
-      {turn.isStopped && <p className="text-xs text-subtle">Stopped</p>}
-      {turn.error && (
+      {answer && <AnswerView answer={answer} />}
+      {error && (
         <div role="alert" className="flex flex-col items-start gap-1.5">
-          <p className="text-destructive select-text">{turn.error}</p>
-          <Button variant="outline" size="sm" onClick={onRetry}>
+          <p className="text-destructive select-text">{error}</p>
+          <Button variant="outline" size="sm" onClick={() => onRetry(turn)}>
             Try again
           </Button>
         </div>
       )}
+      {answer && finishedAt && (
+        <div className="-ml-1 flex opacity-0 transition-opacity duration-150 group-focus-within/turn:opacity-100 group-hover/turn:opacity-100">
+          <CopyButton text={answerAsText(answer)} label="Copy answer" />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Ask again"
+            onClick={() => onRetry(turn)}
+          >
+            <HugeiconsIcon icon={RepeatIcon} strokeWidth={1.5} />
+          </Button>
+        </div>
+      )}
+      {followUps.length > 0 && (
+        <div className="flex animate-fade flex-col items-start gap-1">
+          {followUps.map((followUp) => (
+            <Button
+              key={followUp}
+              variant="outline"
+              size="sm"
+              className="h-auto max-w-full py-1 text-left font-normal whitespace-normal"
+              onClick={() => onAsk(followUp)}
+            >
+              {followUp}
+            </Button>
+          ))}
+        </div>
+      )}
     </div>
   )
-}
+})
 
 function EmptyChat({
   columns,
@@ -101,7 +186,7 @@ type ChatPanelProps = {
 export function ChatPanel({ table, chat }: ChatPanelProps) {
   const { turns, saveError, isAsking, ask, retry, reply, stop, clear } = chat
   const [question, setQuestion] = useState("")
-  const conversation = useRef<HTMLDivElement>(null)
+  const { attach, isFollowing, jumpToEnd, onScroll, onWheel } = useFollow()
   const asked = turns
     .at(-1)
     ?.steps.find(
@@ -109,16 +194,28 @@ export function ChatPanel({ table, chat }: ChatPanelProps) {
     )
   const canSend = question.trim().length > 0 && (!isAsking || Boolean(asked))
 
-  useEffect(() => {
-    const box = conversation.current
-    if (box) box.scrollTop = box.scrollHeight
-  }, [turns])
-
   function send() {
     if (!canSend) return
-    if (asked) reply(question.trim())
-    else ask(question.trim())
+    if (asked) {
+      reply(question.trim())
+    } else {
+      startTurn(question.trim())
+    }
     setQuestion("")
+  }
+
+  const startTurn = useCallback(
+    (text: string) => {
+      ask(text)
+      requestAnimationFrame(jumpToEnd)
+    },
+    [ask, jumpToEnd]
+  )
+
+  function pickOption(key: string) {
+    const option = asked?.options?.[Number(key) - 1]
+    if (option) reply(option)
+    return Boolean(option)
   }
 
   return (
@@ -140,21 +237,48 @@ export function ChatPanel({ table, chat }: ChatPanelProps) {
           </Button>
         )}
       </div>
-      <div
-        ref={conversation}
-        className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto mask-y-from-[calc(100%-1rem)] px-3 py-4"
-      >
-        {turns.length === 0 ? (
-          <EmptyChat columns={table.columns} onAsk={ask} />
-        ) : (
-          turns.map((turn) => (
-            <TurnView key={turn.id} turn={turn} onRetry={() => retry(turn)} />
-          ))
-        )}
-        {saveError && (
-          <p role="alert" className="text-xs text-destructive select-text">
-            This chat couldn't be saved. {saveError}
-          </p>
+      <div className="[container-type:size] relative flex min-h-0 flex-1 flex-col">
+        <div
+          ref={attach}
+          onScroll={onScroll}
+          onWheel={onWheel}
+          className="min-h-0 flex-1 overflow-y-auto mask-y-from-[calc(100%-1rem)]"
+        >
+          <div className="flex min-h-full flex-col gap-5 px-3 py-4">
+            {turns.length === 0 ? (
+              <EmptyChat columns={table.columns} onAsk={startTurn} />
+            ) : (
+              turns.map((turn, index) => (
+                <TurnView
+                  key={turn.id}
+                  turn={turn}
+                  isLast={index === turns.length - 1}
+                  onRetry={retry}
+                  onAsk={startTurn}
+                />
+              ))
+            )}
+            {saveError && (
+              <p role="alert" className="text-xs text-destructive select-text">
+                This chat couldn't be saved. {saveError}
+              </p>
+            )}
+          </div>
+        </div>
+        {!isFollowing && (
+          <Button
+            variant="secondary"
+            size="sm"
+            className="absolute bottom-2 left-1/2 -translate-x-1/2 animate-fade border [animation-delay:150ms]"
+            onClick={jumpToEnd}
+          >
+            <HugeiconsIcon
+              icon={ArrowDown02Icon}
+              strokeWidth={1.5}
+              data-icon="inline-start"
+            />
+            Jump to latest
+          </Button>
         )}
       </div>
       <div className="shrink-0 p-2 pt-0">
@@ -163,13 +287,17 @@ export function ChatPanel({ table, chat }: ChatPanelProps) {
             <p className="select-text">{asked.label}</p>
             {asked.options && asked.options.length > 0 && (
               <div className="flex flex-wrap gap-1">
-                {asked.options.map((option) => (
+                {asked.options.map((option, index) => (
                   <Button
                     key={option}
                     variant="outline"
                     size="sm"
+                    aria-label={option}
                     onClick={() => reply(option)}
                   >
+                    <span className="text-subtle tabular-nums">
+                      {index + 1}
+                    </span>
                     {option}
                   </Button>
                 ))}
@@ -184,8 +312,12 @@ export function ChatPanel({ table, chat }: ChatPanelProps) {
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key !== "Enter" || event.shiftKey) return
               if (event.nativeEvent.isComposing) return
+              if (!question && /^[1-9]$/.test(event.key)) {
+                if (pickOption(event.key)) event.preventDefault()
+                return
+              }
+              if (event.key !== "Enter" || event.shiftKey) return
               event.preventDefault()
               send()
             }}
