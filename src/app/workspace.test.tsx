@@ -1101,12 +1101,16 @@ test("Ask AI shows it's on, and turns the chat off and back", async () => {
   await renderOpenTable(() => SALES_ANSWER)
   const toggle = screen.getByRole("button", { name: "Ask AI" })
   expect(toggle.getAttribute("aria-pressed")).toBe("true")
+  const chat = screen.getByRole("complementary", { name: "Ask AI" })
+  expect(chat.closest("[inert]")).toBeNull()
 
   await userEvent.click(toggle)
   expect(toggle.getAttribute("aria-pressed")).toBe("false")
+  expect(chat.closest("[inert]")).not.toBeNull()
 
   await userEvent.click(toggle)
   expect(toggle.getAttribute("aria-pressed")).toBe("true")
+  expect(chat.closest("[inert]")).toBeNull()
 })
 
 test("the model shown first is saved, so chat can use it", async () => {

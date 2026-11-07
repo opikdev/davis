@@ -142,7 +142,7 @@ export function ChatPanel({ table, chat }: ChatPanelProps) {
       </div>
       <div
         ref={conversation}
-        className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto p-3"
+        className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto mask-y-from-[calc(100%-1rem)] px-3 py-4"
       >
         {turns.length === 0 ? (
           <EmptyChat columns={table.columns} onAsk={ask} />

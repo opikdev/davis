@@ -5,6 +5,7 @@ import {
 } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react"
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
+import type { PanelImperativeHandle } from "react-resizable-panels"
 
 import { AppSidebar, VIEW_LABELS, type View } from "@/app/app-sidebar"
 import { Button } from "@/components/ui/button"
@@ -56,6 +57,7 @@ import { toErrorMessage } from "@/lib/ipc-error"
 import { cn } from "@/lib/utils"
 
 const CHAT_WIDTH = "19rem"
+const CHAT_MIN_WIDTH = "16rem"
 
 function PanelHeader({
   view,
@@ -225,9 +227,25 @@ export function Workspace() {
     [refresh]
   )
   const chat = useChat(project?.path, files.table, onChatSaved)
-  const [chatWidth, setChatWidth] = useState(CHAT_WIDTH)
+  const chatPanel = useRef<PanelImperativeHandle>(null)
+  const chatContent = useRef<HTMLDivElement>(null)
+  const chatWidth = useRef(CHAT_WIDTH)
   const showsTable = view === "data" && Boolean(files.table)
   const showsChat = showsTable && isChatOpen
+  const [keepsChat, setKeepsChat] = useState(false)
+  if (showsChat && !keepsChat) setKeepsChat(true)
+
+  useEffect(() => {
+    const panel = chatPanel.current
+    if (!panel) return
+    if (showsChat) {
+      panel.resize(chatWidth.current)
+      return
+    }
+    const { asPercentage } = panel.getSize()
+    if (asPercentage) chatWidth.current = `${asPercentage}%`
+    panel.resize(0)
+  }, [showsChat])
 
   const { clear: clearChat, open: restoreChat } = chat
   const { close: closeTable, open: openPath } = files
@@ -376,8 +394,14 @@ export function Workspace() {
       <SidebarInset className="min-h-0 overflow-hidden bg-transparent md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:border-0">
         <ResizablePanelGroup
           orientation="horizontal"
+          className="@container animate-panels"
+          onLayoutChange={({ chat: share }) => {
+            if (share && chatContent.current) {
+              chatContent.current.style.width = `${share}cqw`
+            }
+          }}
           onLayoutChanged={({ chat: share }) => {
-            if (share) setChatWidth(`${share}%`)
+            if (share === 0 && showsChat) setIsChatOpen(false)
           }}
         >
           <ResizablePanel id="main" minSize="320px">
@@ -419,19 +443,40 @@ export function Workspace() {
               </div>
             </div>
           </ResizablePanel>
-          {showsChat && files.table && (
-            <>
-              <ResizableHandle className="w-1.5 bg-transparent after:w-1.5 hover:bg-foreground/10 focus-visible:ring-0" />
-              <ResizablePanel
-                id="chat"
-                defaultSize={chatWidth}
-                minSize="16rem"
-                maxSize="34rem"
-              >
+          <ResizableHandle
+            disabled={!showsChat}
+            className="w-0 bg-transparent after:left-0 after:w-1.5 after:translate-x-0 hover:after:bg-foreground/10 focus-visible:ring-0"
+          />
+          <ResizablePanel
+            id="chat"
+            panelRef={chatPanel}
+            collapsible
+            collapsedThreshold={CHAT_MIN_WIDTH}
+            defaultSize={0}
+            minSize={CHAT_MIN_WIDTH}
+            maxSize="34rem"
+            style={{ overflow: "hidden" }}
+            onTransitionEnd={(event) => {
+              if (!showsChat && event.target === event.currentTarget) {
+                setKeepsChat(false)
+              }
+            }}
+          >
+            {/* Keeps its width while the panel slides, so nothing reflows. */}
+            <div
+              ref={chatContent}
+              inert={!showsChat}
+              style={{ width: CHAT_WIDTH }}
+              className={cn(
+                "h-full pl-1.5 transition-opacity duration-200 ease-native",
+                !showsChat && "opacity-0"
+              )}
+            >
+              {keepsChat && files.table && (
                 <ChatPanel table={files.table} chat={chat} />
-              </ResizablePanel>
-            </>
-          )}
+              )}
+            </div>
+          </ResizablePanel>
         </ResizablePanelGroup>
       </SidebarInset>
     </SidebarProvider>

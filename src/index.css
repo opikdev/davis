@@ -254,6 +254,12 @@
   }
 }
 
+@utility animate-panels {
+  &:not(:has(> [data-separator="active"])) > [data-panel] {
+    transition: flex-grow 220ms var(--ease-native);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *:not(.animate-spin),
   *:not(.animate-spin)::before,
