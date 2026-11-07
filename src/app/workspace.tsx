@@ -40,13 +40,16 @@ import {
   chooseFiles,
   DataView,
   fileName,
-  openTable,
   useOpenTable,
+  useProfile,
   type OpenedTable,
 } from "@/features/data"
 import { Home, useFileDrop } from "@/features/home"
 import {
   addProjectFile,
+  checkDataFile,
+  dataFilesIn,
+  LinkedFiles,
   removeProjectFile,
   useProject,
   type ChatSummary,
@@ -222,6 +225,7 @@ export function Workspace() {
   const projects = useProject()
   const { project, loadLast, refresh } = projects
   const files = useOpenTable()
+  const profile = useProfile(files.table?.source)
   const onChatSaved = useCallback(
     (path: string) => void refresh(path),
     [refresh]
@@ -302,9 +306,14 @@ export function Workspace() {
     if (file) await files.open(file.path)
   }
 
-  async function addFiles(paths: string[]) {
-    if (paths.length === 0) return
+  async function addFiles(dropped: string[]) {
+    if (dropped.length === 0) return
     setProjectError(undefined)
+    const paths = await dataFilesIn(dropped)
+    if (paths.length === 0) {
+      setProjectError("That folder has no data files in it.")
+      return
+    }
     setView("home")
     let target = project
     let hasAdded = false
@@ -312,7 +321,7 @@ export function Workspace() {
       const wasAdded = await files.load(fileName(path), async () => {
         if (!target) {
           // A file Davis can't read shouldn't leave an empty project behind.
-          await openTable(path)
+          await checkDataFile(path)
           target = await projects.create(projectNameFor(path))
         }
         return addProjectFile(target.path, path)
@@ -437,6 +446,20 @@ export function Workspace() {
                     <DataView
                       key={files.table.source.path}
                       table={files.table}
+                      profile={profile}
+                      footerAction={
+                        project && (
+                          <LinkedFiles
+                            project={project.path}
+                            fileName={files.table.name}
+                            fileCount={project.files.length}
+                            onCombined={(table) => {
+                              void refresh(project.path)
+                              void files.load(table.name, async () => table)
+                            }}
+                          />
+                        )
+                      }
                     />
                   </div>
                 )}
@@ -473,7 +496,7 @@ export function Workspace() {
               )}
             >
               {keepsChat && files.table && (
-                <ChatPanel table={files.table} chat={chat} />
+                <ChatPanel table={files.table} profile={profile} chat={chat} />
               )}
             </div>
           </ResizablePanel>

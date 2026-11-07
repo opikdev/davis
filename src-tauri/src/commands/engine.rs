@@ -1,4 +1,6 @@
-use davis_core::{EngineInfo, OpenedTable, Row, TableSource};
+use davis_core::{
+    ColumnKind, ColumnProfile, EngineInfo, OpenedTable, Row, TableSource, ValueCount,
+};
 use tauri::async_runtime::spawn_blocking;
 
 use crate::error::AppError;
@@ -16,4 +18,18 @@ pub async fn open_table(path: String) -> Result<OpenedTable, AppError> {
 #[tauri::command]
 pub async fn read_rows(source: TableSource, offset: u64, limit: u64) -> Result<Vec<Row>, AppError> {
     Ok(spawn_blocking(move || davis_core::read_rows(&source, offset, limit)).await??)
+}
+
+#[tauri::command]
+pub async fn profile_table(source: TableSource) -> Result<Vec<ColumnProfile>, AppError> {
+    Ok(spawn_blocking(move || davis_core::profile_table(&source)).await??)
+}
+
+#[tauri::command]
+pub async fn column_values(
+    source: TableSource,
+    column: String,
+    kind: ColumnKind,
+) -> Result<Vec<ValueCount>, AppError> {
+    Ok(spawn_blocking(move || davis_core::column_values(&source, &column, kind)).await??)
 }

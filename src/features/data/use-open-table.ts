@@ -4,7 +4,20 @@ import { useCallback, useState } from "react"
 import { openTable, type OpenedTable } from "@/features/data/api"
 import { toErrorMessage } from "@/lib/ipc-error"
 
-const EXTENSIONS = ["csv", "tsv", "txt", "gz", "parquet", "json", "jsonl"]
+const EXTENSIONS = [
+  "csv",
+  "tsv",
+  "txt",
+  "gz",
+  "xlsx",
+  "xlsm",
+  "xlsb",
+  "xls",
+  "ods",
+  "parquet",
+  "json",
+  "jsonl",
+]
 
 export function fileName(path: string) {
   return path.split(/[\\/]/).pop() ?? path

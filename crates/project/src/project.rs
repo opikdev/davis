@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::chats::{CHATS_FOLDER, ChatSummary, list_chats};
 use crate::storage::write_json;
+use crate::workbook::is_workbook;
 use crate::{Error, Result};
 
 const MARKER_FILE: &str = "project.json";
@@ -129,15 +130,17 @@ pub fn rename_project(folder: &Path, name: &str) -> Result<Project> {
     read_project(&renamed)
 }
 
+fn is_hidden(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+}
+
 fn is_data_file(path: &Path) -> bool {
-    let is_hidden = path
-        .file_name()
-        .is_some_and(|name| name.to_string_lossy().starts_with('.'));
     let has_data_extension = path.extension().is_some_and(|extension| {
         let extension = extension.to_string_lossy().to_lowercase();
         DATA_EXTENSIONS.contains(&extension.as_str())
     });
-    path.is_file() && !is_hidden && has_data_extension
+    path.is_file() && !is_hidden(path) && has_data_extension
 }
 
 fn file_details(path: &Path) -> Result<ProjectFile> {
@@ -161,19 +164,64 @@ fn list_files(folder: &Path) -> Result<Vec<ProjectFile>> {
     paths.iter().map(|path| file_details(path)).collect()
 }
 
-fn split_file_name(name: &str) -> (&str, Option<&str>) {
+pub(crate) fn split_file_name(name: &str) -> (&str, Option<&str>) {
     match name.split_once('.') {
         Some((stem, extension)) if !stem.is_empty() => (stem, Some(extension)),
         _ => (name, None),
     }
 }
 
-pub fn add_file(project: &Path, source: &Path) -> Result<ProjectFile> {
+pub(crate) fn data_folder(project: &Path) -> Result<PathBuf> {
     if !is_project(project) {
         return Err(Error::NotAProject(folder_name(project)));
     }
     let data = project.join(DATA_FOLDER);
     fs::create_dir_all(&data)?;
+    Ok(data)
+}
+
+pub(crate) fn place_file(data: &Path, name: &str, content: &[u8]) -> Result<ProjectFile> {
+    let same_name = data.join(name);
+    if same_name.is_file() && fs::metadata(&same_name)?.len() == content.len() as u64 {
+        return file_details(&same_name);
+    }
+    let (stem, extension) = split_file_name(name);
+    let target = first_free_path(data, stem, extension);
+    let partial = data.join(format!(".{name}.{}.part", std::process::id()));
+    fs::write(&partial, content)?;
+    fs::rename(&partial, &target)?;
+    file_details(&target)
+}
+
+pub fn new_file_path(project: &Path, name: &str) -> Result<PathBuf> {
+    let data = data_folder(project)?;
+    let (stem, extension) = split_file_name(name);
+    Ok(first_free_path(&data, stem, extension))
+}
+
+// A dropped folder adds the data files directly inside it.
+pub fn data_files_in(paths: &[String]) -> Result<Vec<String>> {
+    let mut files = Vec::new();
+    for path in paths {
+        if !Path::new(path).is_dir() {
+            files.push(path.clone());
+            continue;
+        }
+        let mut inside = Vec::new();
+        for entry in fs::read_dir(path)? {
+            let entry = entry?.path();
+            if is_data_file(&entry) || (is_workbook(&entry) && !is_hidden(&entry)) {
+                inside.push(entry.to_string_lossy().into_owned());
+            }
+        }
+        inside.sort();
+        files.append(&mut inside);
+    }
+    Ok(files)
+}
+
+pub fn add_file(project: &Path, source: &Path) -> Result<ProjectFile> {
+    let data = data_folder(project)?;
     let name = folder_name(source);
     let same_name = data.join(&name);
     let is_inside_project = source.canonicalize()?.parent() == Some(data.canonicalize()?.as_path());
@@ -399,6 +447,28 @@ pub(crate) mod tests {
             .collect();
 
         assert_eq!(names, ["a.CSV", "b.parquet"]);
+    }
+
+    #[test]
+    fn a_folder_adds_the_data_files_directly_inside_it() {
+        let folder = Folder::new("dropped");
+        let dropped = folder.path().join("exports");
+        fs::create_dir_all(dropped.join("nested")).unwrap();
+        fs::write(dropped.join("b.csv"), "x").unwrap();
+        fs::write(dropped.join("a.xlsx"), "x").unwrap();
+        fs::write(dropped.join("notes.pdf"), "x").unwrap();
+        fs::write(dropped.join(".hidden.csv"), "x").unwrap();
+        fs::write(dropped.join("nested").join("c.csv"), "x").unwrap();
+        let single = folder.path().join("one.pdf").to_string_lossy().into_owned();
+
+        let files =
+            data_files_in(&[dropped.to_string_lossy().into_owned(), single.clone()]).unwrap();
+
+        let names: Vec<&str> = files
+            .iter()
+            .map(|path| path.rsplit('/').next().unwrap())
+            .collect();
+        assert_eq!(names, ["a.xlsx", "b.csv", "one.pdf"]);
     }
 
     #[test]

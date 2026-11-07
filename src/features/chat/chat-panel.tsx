@@ -1,5 +1,4 @@
 import {
-  AiChat02Icon,
   ArrowDown02Icon,
   ArrowUp02Icon,
   Copy01Icon,
@@ -26,7 +25,12 @@ import type { AgentAnswer, Turn } from "@/features/chat/api"
 import { fillReferences } from "@/features/chat/references"
 import type { useChat } from "@/features/chat/use-chat"
 import { useFollow } from "@/features/chat/use-follow"
-import type { Column, OpenedTable } from "@/features/data"
+import {
+  briefLines,
+  type Column,
+  type ColumnProfile,
+  type OpenedTable,
+} from "@/features/data"
 import { cn } from "@/lib/utils"
 
 const COPIED_MS = 1500
@@ -144,46 +148,50 @@ const TurnView = memo(function TurnView({
   )
 })
 
-function EmptyChat({
-  columns,
-  onAsk,
-}: {
-  columns: Column[]
+type EmptyChatProps = {
+  table: OpenedTable
+  profile?: ColumnProfile[]
   onAsk: (question: string) => void
-}) {
+}
+
+function EmptyChat({ table, profile, onAsk }: EmptyChatProps) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-3 px-2 text-center">
-      <HugeiconsIcon
-        icon={AiChat02Icon}
-        strokeWidth={1.5}
-        className="size-5 text-subtle"
-      />
-      <p className="max-w-56 text-subtle">
-        Ask in plain words. The AI sees column names, never your rows.
-      </p>
+    <div className="flex flex-1 flex-col justify-center gap-3 px-1">
+      <div className="flex flex-col gap-1 leading-relaxed">
+        <h2 className="truncate text-foreground">{table.name}</h2>
+        {briefLines(table, profile).map((line) => (
+          <p key={line} className="animate-fade text-muted-foreground">
+            {line}
+          </p>
+        ))}
+      </div>
       <div className="flex w-full flex-col gap-1">
-        {suggestionsFor(columns).map((suggestion) => (
+        {suggestionsFor(table.columns).map((suggestion) => (
           <Button
             key={suggestion}
             variant="outline"
             size="sm"
-            className="h-auto min-h-6 w-full justify-start py-1 text-left font-normal whitespace-normal text-muted-foreground"
+            className="h-auto min-h-6 w-full justify-start py-1 text-left font-normal whitespace-normal"
             onClick={() => onAsk(suggestion)}
           >
             {suggestion}
           </Button>
         ))}
       </div>
+      <p className="text-xs text-subtle">
+        The AI sees column names and up to 50 rows of each query it runs.
+      </p>
     </div>
   )
 }
 
 type ChatPanelProps = {
   table: OpenedTable
+  profile?: ColumnProfile[]
   chat: ReturnType<typeof useChat>
 }
 
-export function ChatPanel({ table, chat }: ChatPanelProps) {
+export function ChatPanel({ table, profile, chat }: ChatPanelProps) {
   const { turns, saveError, isAsking, ask, retry, reply, stop, clear } = chat
   const [question, setQuestion] = useState("")
   const { attach, isFollowing, jumpToEnd, onScroll, onWheel } = useFollow()
@@ -246,7 +254,7 @@ export function ChatPanel({ table, chat }: ChatPanelProps) {
         >
           <div className="flex min-h-full flex-col gap-5 px-3 py-4">
             {turns.length === 0 ? (
-              <EmptyChat columns={table.columns} onAsk={startTurn} />
+              <EmptyChat table={table} profile={profile} onAsk={startTurn} />
             ) : (
               turns.map((turn, index) => (
                 <TurnView

@@ -99,6 +99,10 @@ type Backend = {
   ask?: (args: unknown) => unknown
   onStop?: (turn: unknown) => void
   onReply?: (reply: unknown) => void
+  profile?: () => unknown
+  values?: (args: unknown) => unknown
+  links?: () => unknown
+  onCombine?: (args: unknown) => unknown
   project?: ProjectFixture
   saved?: SavedChatFixture[]
   onSaveChat?: (chat: unknown) => void
@@ -135,6 +139,10 @@ function renderWorkspace({
   ask,
   onStop,
   onReply,
+  profile,
+  values,
+  links,
+  onCombine,
   project: existing,
   saved = [],
   onSaveChat,
@@ -146,6 +154,12 @@ function renderWorkspace({
   mockIPC((command, args) => {
     const payload = args as Record<string, unknown>
     commands?.push(command)
+    if (command === "data_files_in") return payload.paths
+    if (command === "check_data_file") return openTable?.()
+    if (command === "profile_table") return profile?.()
+    if (command === "column_values") return values?.(payload)
+    if (command === "project_links") return links?.() ?? []
+    if (command === "combine_project_files") return onCombine?.(payload)
     if (command === "last_project") return existing ?? null
     if (command === "recent_projects")
       return current ? [{ path: current.path, name: current.name }] : []
@@ -295,7 +309,9 @@ test("dropping a file opens it in a table", async () => {
   expect(await screen.findByText("EMEA")).toBeTruthy()
   expect(screen.getByText("1200")).toBeTruthy()
   expect(screen.getByText("null")).toBeTruthy()
-  expect(screen.getByRole("heading", { name: "sales.csv" })).toBeTruthy()
+  expect(
+    screen.getByRole("heading", { name: "sales.csv", level: 1 })
+  ).toBeTruthy()
   expect(screen.getByRole("banner").textContent).toContain("sales.csv")
   expect(screen.getByText("2 rows, 2 columns")).toBeTruthy()
   expect(screen.getByRole("columnheader", { name: /region/ })).toBeTruthy()
@@ -882,6 +898,158 @@ test("deleting the open chat starts a fresh one", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Delete chat" }))
 
   await waitFor(() => expect(screen.queryByText("Saved answer")).toBeNull())
+})
+
+const SALES_PROFILE = [
+  {
+    name: "region",
+    kind: "text",
+    missingPercent: 12.5,
+    uniqueValues: 3,
+    min: "APAC",
+    max: "EMEA",
+    mean: null,
+  },
+  {
+    name: "amount",
+    kind: "number",
+    missingPercent: 0,
+    uniqueValues: 40,
+    min: "5",
+    max: "1200",
+    mean: "310.5",
+  },
+  {
+    name: "day",
+    kind: "date",
+    missingPercent: 0,
+    uniqueValues: 90,
+    min: "2026-01-01 00:00:00",
+    max: "2026-03-31 00:00:00",
+    mean: null,
+  },
+]
+
+test("a new chat opens with a brief of the file, worked out locally", async () => {
+  const ask = vi.fn()
+  await renderOpenTable(ask, undefined, { profile: () => SALES_PROFILE })
+
+  expect(await screen.findByText("2 rows and 2 columns.")).toBeTruthy()
+  expect(
+    await screen.findByText("day runs from 2026-01-01 to 2026-03-31.")
+  ).toBeTruthy()
+  expect(
+    screen.getByText("region is missing 12.5% of its values.")
+  ).toBeTruthy()
+  expect(ask).not.toHaveBeenCalled()
+})
+
+test("the chat is honest about what the AI can see", async () => {
+  await renderOpenTable(() => SALES_ANSWER)
+
+  expect(
+    screen.getByText(
+      "The AI sees column names and up to 50 rows of each query it runs."
+    )
+  ).toBeTruthy()
+  expect(screen.queryByText(/never your rows/)).toBeNull()
+})
+
+test("the table footer says when columns have gaps", async () => {
+  await renderOpenTable(() => SALES_ANSWER, undefined, {
+    profile: () => SALES_PROFILE,
+  })
+
+  expect(await screen.findByText("1 column with gaps")).toBeTruthy()
+})
+
+test("a file still opens if profiling fails", async () => {
+  const report = vi.spyOn(console, "error").mockImplementation(() => {})
+  await renderOpenTable(() => SALES_ANSWER, undefined, {
+    profile: () => {
+      throw { kind: "engine", message: "No." }
+    },
+  })
+
+  expect(await screen.findByText("2 rows and 2 columns.")).toBeTruthy()
+  expect(screen.getByText("1200")).toBeTruthy()
+  report.mockRestore()
+})
+
+test("a folder with no data says so", async () => {
+  renderWorkspace()
+  mockIPC((command) => {
+    if (command === "data_files_in") return []
+    if (command === "recent_projects") return []
+    return undefined
+  })
+
+  dropFile("/Users/me/Pictures")
+
+  await waitFor(() =>
+    expect(screen.getByRole("status").textContent).toBe(
+      "That folder has no data files in it."
+    )
+  )
+})
+
+const ORDERS_LINK = {
+  fromFile: "sales.csv",
+  fromColumn: "customer_id",
+  toFile: "customers.csv",
+  toColumn: "id",
+  matchPercent: 100,
+}
+
+test("a linked file can be added with one click", async () => {
+  const onCombine = vi.fn<(args: unknown) => unknown>(() => ({
+    ...SALES_TABLE,
+    name: "sales with customers.parquet",
+  }))
+  await renderOpenTable(() => SALES_ANSWER, undefined, {
+    links: () => [ORDERS_LINK],
+    onCombine,
+  })
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "customers.csv" })
+  )
+  await userEvent.click(
+    await screen.findByRole("button", {
+      name: "Add columns from customers.csv",
+    })
+  )
+
+  await waitFor(() => expect(onCombine).toHaveBeenCalled())
+  expect(onCombine.mock.lastCall?.[0]).toMatchObject({ link: ORDERS_LINK })
+  expect(
+    await screen.findByRole("heading", {
+      name: "sales with customers.parquet",
+      level: 1,
+    })
+  ).toBeTruthy()
+})
+
+test("a near match never reads as a perfect one", async () => {
+  await renderOpenTable(() => SALES_ANSWER, undefined, {
+    links: () => [{ ...ORDERS_LINK, matchPercent: 99.96 }],
+  })
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "customers.csv" })
+  )
+
+  expect(await screen.findByText(/for 99\.9% of rows/)).toBeTruthy()
+})
+
+test("links from other files aren't offered on this one", async () => {
+  await renderOpenTable(() => SALES_ANSWER, undefined, {
+    links: () => [{ ...ORDERS_LINK, fromFile: "other.csv" }],
+  })
+
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "customers.csv" })).toBeNull()
+  )
 })
 
 test("New chat starts over", async () => {

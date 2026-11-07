@@ -93,7 +93,7 @@ fn run_query_within(
 
 // The views are created before lockdown because lockdown can't be undone. The files
 // stay writable through `allowed_paths`, so `require_one_select` is what protects them.
-fn locked_connection(tables: &[QueryTable]) -> Result<Connection> {
+pub(crate) fn locked_connection(tables: &[QueryTable]) -> Result<Connection> {
     let connection = connect()?;
     let views: String = tables
         .iter()

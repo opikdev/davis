@@ -53,3 +53,27 @@ export function addProjectFile(project: string, path: string) {
 export function removeProjectFile(project: string, name: string) {
   return invoke<void>("remove_project_file", { project, name })
 }
+
+export type FileLink = {
+  fromFile: string
+  fromColumn: string
+  toFile: string
+  toColumn: string
+  matchPercent: number
+}
+
+export function dataFilesIn(paths: string[]) {
+  return invoke<string[]>("data_files_in", { paths })
+}
+
+export function checkDataFile(path: string) {
+  return invoke<void>("check_data_file", { path })
+}
+
+export function projectLinks(project: string) {
+  return invoke<FileLink[]>("project_links", { project })
+}
+
+export function combineProjectFiles(project: string, link: FileLink) {
+  return invoke<OpenedTable>("combine_project_files", { project, link })
+}

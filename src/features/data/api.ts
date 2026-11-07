@@ -25,10 +25,37 @@ export type OpenedTable = {
 
 export type Row = (string | null)[]
 
+export type ColumnProfile = {
+  name: string
+  kind: ColumnKind
+  missingPercent: number
+  uniqueValues: number
+  min: string | null
+  max: string | null
+  mean: string | null
+}
+
+export type ValueCount = {
+  label: string
+  count: number
+}
+
 export function openTable(path: string) {
   return invoke<OpenedTable>("open_table", { path })
 }
 
 export function readRows(source: TableSource, offset: number, limit: number) {
   return invoke<Row[]>("read_rows", { source, offset, limit })
+}
+
+export function profileTable(source: TableSource) {
+  return invoke<ColumnProfile[]>("profile_table", { source })
+}
+
+export function columnValues(
+  source: TableSource,
+  column: string,
+  kind: ColumnKind
+) {
+  return invoke<ValueCount[]>("column_values", { source, column, kind })
 }

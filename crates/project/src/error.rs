@@ -8,6 +8,10 @@ pub enum Error {
     InvalidName,
     #[error("Couldn't find that item in the project.")]
     MissingItem,
+    #[error("Couldn't read {0}. It may be damaged or protected by a password.")]
+    UnreadableWorkbook(String),
+    #[error("{0} has no data in it.")]
+    EmptyWorkbook(String),
     #[error("Davis couldn't update the project folder: {0}")]
     Storage(#[from] std::io::Error),
     #[error("Davis couldn't save that: {0}")]
@@ -21,6 +25,8 @@ impl Error {
             Self::NameTaken(_) => "name-taken",
             Self::InvalidName => "invalid-name",
             Self::MissingItem => "missing-item",
+            Self::UnreadableWorkbook(_) => "unreadable-workbook",
+            Self::EmptyWorkbook(_) => "empty-workbook",
             Self::Storage(_) => "project-storage",
             Self::Encoding(_) => "project-encoding",
         }

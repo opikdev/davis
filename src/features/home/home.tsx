@@ -124,8 +124,8 @@ export function Home({
           </h1>
           <p className="text-muted-foreground">
             {projectName
-              ? `CSV, Parquet, or JSON. Copied into ${projectName}, and your originals stay as they are.`
-              : "CSV, Parquet, or JSON. They stay on this computer."}
+              ? `Excel, CSV, Parquet, or JSON, or a folder of them. Copied into ${projectName}, and your originals stay as they are.`
+              : "Excel, CSV, Parquet, or JSON, or a folder of them. They stay on this computer."}
           </p>
           <Button
             onClick={onBrowse}

@@ -17,7 +17,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import type { Column, ColumnKind, OpenedTable } from "@/features/data/api"
+import type {
+  Column,
+  ColumnKind,
+  ColumnProfile,
+  OpenedTable,
+} from "@/features/data/api"
+import { ColumnStats } from "@/features/data/column-stats"
 import { TableScrollbar } from "@/features/data/table-scrollbar"
 import { useRowPages } from "@/features/data/use-row-pages"
 import { useTableScroll } from "@/features/data/use-table-scroll"
@@ -68,10 +74,15 @@ function useElementSize(element: React.RefObject<HTMLElement | null>) {
 
 type DataTableProps = {
   table: OpenedTable
+  profile?: ColumnProfile[]
   onVisibleRowsChange: (first: number, last: number) => void
 }
 
-export function DataTable({ table, onVisibleRowsChange }: DataTableProps) {
+export function DataTable({
+  table,
+  profile,
+  onVisibleRowsChange,
+}: DataTableProps) {
   const { columns, rowCount, source } = table
   const element = useRef<HTMLDivElement>(null)
   const { width, height } = useElementSize(element)
@@ -162,18 +173,23 @@ export function DataTable({ table, onVisibleRowsChange }: DataTableProps) {
             {columns.map((column) => (
               <TableHead
                 key={column.name}
-                title={`${column.name} (${column.dataType})`}
                 className={cn(
                   "flex h-auto items-center gap-1.5 border-r px-2 font-normal text-muted-foreground last:border-r-0",
                   column.kind === "number" && "justify-end"
                 )}
               >
-                <HugeiconsIcon
-                  icon={KIND_ICONS[column.kind]}
-                  strokeWidth={1.5}
-                  className="size-3 shrink-0 text-subtle"
-                />
-                <span className="truncate">{column.name}</span>
+                <ColumnStats
+                  column={column}
+                  source={source}
+                  profile={profile?.find(({ name }) => name === column.name)}
+                >
+                  <HugeiconsIcon
+                    icon={KIND_ICONS[column.kind]}
+                    strokeWidth={1.5}
+                    className="size-3 shrink-0 text-subtle"
+                  />
+                  <span className="truncate">{column.name}</span>
+                </ColumnStats>
               </TableHead>
             ))}
           </TableRow>

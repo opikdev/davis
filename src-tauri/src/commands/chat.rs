@@ -36,7 +36,7 @@ impl AskRegistry {
     }
 }
 
-fn project_tables(project: &Path) -> Result<Vec<ProjectTable>, AppError> {
+pub(crate) fn project_tables(project: &Path) -> Result<Vec<ProjectTable>, AppError> {
     let mut tables: Vec<ProjectTable> = Vec::new();
     for file in davis_project::read_project(project)?.files {
         // One unreadable file shouldn't stop questions about the others.
