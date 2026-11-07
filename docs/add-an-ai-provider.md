@@ -31,3 +31,5 @@
 4. Run `pnpm check`.
 
 To check an AI app's sign-in, add a case to `check_app` in `crates/ai/src/apps.rs` that uses the app's own status command. A signed-in app then connects without a click. Only add an app with a status command that you have tested both signed in and signed out, because Davis has no other proof that the app works.
+
+To add an AI app that answers questions, prove first that it can't read files on its own. Run it with the arguments Davis will use against a test file, and confirm the contents never come back. See [What the AI can reach](architecture.md#what-the-ai-can-reach).
