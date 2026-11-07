@@ -34,6 +34,7 @@ import { PageChart } from "@/features/pages/page-chart"
 import { cn } from "@/lib/utils"
 
 const ALL_ROWS = 1000
+const EXPORTED_ROWS = 20
 const SPARK_WIDTH = 72
 const SPARK_HEIGHT = 24
 
@@ -110,8 +111,19 @@ function NumberBody({
   )
 }
 
-function TableBody({ block, result }: { block: Block; result: QueryResult }) {
+function TableBody({
+  block,
+  result,
+  isExporting,
+}: {
+  block: Block
+  result: QueryResult
+  isExporting?: boolean
+}) {
   const rows = arrangedRows(block, result)
+  if (isExporting) {
+    return <ResultTable result={{ ...result, rows }} rowLimit={EXPORTED_ROWS} />
+  }
   return (
     <div
       role="region"
@@ -127,10 +139,12 @@ function TableBody({ block, result }: { block: Block; result: QueryResult }) {
 function FigureBody({
   block,
   outcome,
+  isExporting,
   onSelectValue,
 }: {
   block: Block
   outcome?: BlockResult
+  isExporting?: boolean
   onSelectValue?: (column: string, value: string, grain?: Grain) => void
 }) {
   if (outcome?.error) {
@@ -146,7 +160,9 @@ function FigureBody({
   if (block.view === "number") {
     return <NumberBody block={block} result={result} trend={trend} />
   }
-  if (block.view === "table") return <TableBody block={block} result={result} />
+  if (block.view === "table") {
+    return <TableBody block={block} result={result} isExporting={isExporting} />
+  }
   const { xColumn } = block
   return (
     <div className="h-56 min-h-0">
@@ -238,6 +254,7 @@ type BlockViewProps = {
   outcome?: BlockResult
   isEditing: boolean
   isSelected: boolean
+  isExporting?: boolean
   dragAttributes?: DraggableAttributes
   dragListeners?: SyntheticListenerMap
   onSelect: () => void
@@ -251,6 +268,7 @@ export function BlockView({
   outcome,
   isEditing,
   isSelected,
+  isExporting,
   dragAttributes,
   dragListeners,
   onSelect,
@@ -274,6 +292,7 @@ export function BlockView({
     >
       {showsTitle && <h2 className="truncate pr-1 font-medium">{label}</h2>}
       <div
+        hidden={isExporting}
         className={cn(
           "absolute top-1.5 right-1.5 z-10 flex rounded-md bg-background opacity-0 transition-opacity group-focus-within/block:opacity-100 group-hover/block:opacity-100",
           isSelected && "opacity-100"
@@ -322,6 +341,7 @@ export function BlockView({
         <FigureBody
           block={block}
           outcome={outcome}
+          isExporting={isExporting}
           onSelectValue={isEditing ? undefined : onSelectValue}
         />
       ) : (

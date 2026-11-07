@@ -10,6 +10,8 @@ pub enum AppError {
     Engine(#[from] davis_core::Error),
     #[error(transparent)]
     Project(#[from] davis_project::Error),
+    #[error("Davis couldn't export this Page: {0}")]
+    Export(String),
     #[error("Background task failed: {0}")]
     Task(#[from] tauri::Error),
 }
@@ -21,6 +23,7 @@ impl AppError {
             Self::Ai(error) => error.code(),
             Self::Engine(error) => error.code(),
             Self::Project(error) => error.code(),
+            Self::Export(_) => "export",
             Self::Task(_) => "task",
         }
     }

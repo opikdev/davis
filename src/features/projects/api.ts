@@ -57,6 +57,22 @@ export function addProjectFile(project: string, path: string) {
   return invoke<OpenedTable>("add_project_file", { project, path })
 }
 
+export function checkReplacement(project: string, name: string, path: string) {
+  return invoke<{ missingColumns: string[] }>("check_replacement", {
+    project,
+    name,
+    path,
+  })
+}
+
+export function replaceProjectFile(
+  project: string,
+  name: string,
+  path: string
+) {
+  return invoke<OpenedTable>("replace_project_file", { project, name, path })
+}
+
 export function removeProjectFile(project: string, name: string) {
   return invoke<void>("remove_project_file", { project, name })
 }

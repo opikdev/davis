@@ -11,6 +11,7 @@ export { useProfile } from "@/features/data/use-profile"
 export { DataView } from "@/features/data/data-view"
 export {
   chooseFiles,
+  chooseReplacement,
   fileName,
   useOpenTable,
 } from "@/features/data/use-open-table"

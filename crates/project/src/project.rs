@@ -246,7 +246,7 @@ pub fn add_file(project: &Path, source: &Path) -> Result<ProjectFile> {
     file_details(&target)
 }
 
-pub fn remove_file(project: &Path, name: &str) -> Result<()> {
+fn existing_data_file(project: &Path, name: &str) -> Result<PathBuf> {
     if Path::new(name)
         .file_name()
         .map(|plain| plain.to_string_lossy())
@@ -258,8 +258,40 @@ pub fn remove_file(project: &Path, name: &str) -> Result<()> {
     if !is_data_file(&path) {
         return Err(Error::MissingItem);
     }
-    fs::remove_file(path)?;
+    Ok(path)
+}
+
+pub fn remove_file(project: &Path, name: &str) -> Result<()> {
+    fs::remove_file(existing_data_file(project, name)?)?;
     Ok(())
+}
+
+pub fn check_same_kind(name: &str, source: &Path) -> Result<()> {
+    let extension = |path: &Path| {
+        path.extension()
+            .map(|extension| extension.to_string_lossy().to_lowercase())
+    };
+    let expected = extension(Path::new(name)).unwrap_or_default();
+    if extension(source).as_deref() == Some(expected.as_str()) {
+        return Ok(());
+    }
+    Err(Error::WrongFileKind(expected, name.to_owned()))
+}
+
+// The name stays the same, so every Page and chat built on this file keeps working.
+pub fn replace_file(project: &Path, name: &str, source: &Path) -> Result<ProjectFile> {
+    let target = existing_data_file(project, name)?;
+    check_same_kind(name, source)?;
+    if source.canonicalize()? == target.canonicalize()? {
+        return file_details(&target);
+    }
+    let partial = target.with_file_name(format!(".{name}.{}.part", std::process::id()));
+    let copied = fs::copy(source, &partial).and_then(|_| fs::rename(&partial, &target));
+    if let Err(error) = copied {
+        let _ = fs::remove_file(&partial);
+        return Err(error.into());
+    }
+    file_details(&target)
 }
 
 #[cfg(test)]
@@ -473,6 +505,50 @@ pub(crate) mod tests {
             .map(|path| folder_name(Path::new(path)))
             .collect();
         assert_eq!(names, ["a.xlsx", "b.csv", "one.pdf"]);
+    }
+
+    #[test]
+    fn replacing_a_file_keeps_its_name_and_changes_its_data() {
+        let folder = Folder::new("replace");
+        let project = project_in(&folder);
+        fs::write(project.join("data").join("sales.csv"), "a\n1\n").unwrap();
+        let newer = folder.path().join("sales-may.csv");
+        fs::write(&newer, "a\n1\n2\n").unwrap();
+
+        let replaced = replace_file(&project, "sales.csv", &newer).unwrap();
+
+        assert_eq!(replaced.name, "sales.csv");
+        assert_eq!(fs::read_to_string(&replaced.path).unwrap(), "a\n1\n2\n");
+        let files = read_project(&project).unwrap().files;
+        assert_eq!(files.len(), 1);
+        assert_eq!(fs::read_to_string(&newer).unwrap(), "a\n1\n2\n");
+    }
+
+    #[test]
+    fn a_file_of_another_kind_can_not_replace_one() {
+        let folder = Folder::new("replace-kind");
+        let project = project_in(&folder);
+        let current = project.join("data").join("sales.csv");
+        fs::write(&current, "a\n1\n").unwrap();
+        let other = folder.path().join("sales.parquet");
+        fs::write(&other, "x").unwrap();
+
+        let error = replace_file(&project, "sales.csv", &other).unwrap_err();
+
+        assert_eq!(error.code(), "wrong-file-kind");
+        assert_eq!(fs::read_to_string(&current).unwrap(), "a\n1\n");
+    }
+
+    #[test]
+    fn replacing_a_file_with_itself_leaves_it_alone() {
+        let folder = Folder::new("replace-self");
+        let project = project_in(&folder);
+        let current = project.join("data").join("sales.csv");
+        fs::write(&current, "a\n1\n").unwrap();
+
+        replace_file(&project, "sales.csv", &current).unwrap();
+
+        assert_eq!(fs::read_to_string(&current).unwrap(), "a\n1\n");
     }
 
     #[test]

@@ -21,6 +21,7 @@ const drops = vi.hoisted(() => ({
   send: (() => {}) as (event: unknown) => void,
 }))
 const chooseFile = vi.hoisted(() => vi.fn())
+const setFullscreen = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const writeText = vi.hoisted(() => vi.fn())
 
 // The panel library measures real layout, which jsdom doesn't have.
@@ -35,6 +36,15 @@ vi.mock("@/components/ui/resizable", () => ({
 }))
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: chooseFile }))
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({ setFullscreen }),
+}))
+vi.mock("@/features/pages/export", async (original) => ({
+  ...(await original<typeof import("@/features/pages/export")>()),
+  captureSheet: () => [
+    { data: "data:image/png;base64,aGk=", width: 1, height: 1 },
+  ],
+}))
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText }))
 
 vi.mock("@tauri-apps/api/webview", () => ({
@@ -106,6 +116,9 @@ type Backend = {
   pages?: PageFixture[]
   onRunPage?: (page: unknown) => void
   onBuild?: (spec: unknown) => void
+  onExport?: (args: unknown) => void
+  onReplace?: (args: unknown) => void
+  missingColumns?: string[]
   project?: ProjectFixture
   saved?: SavedChatFixture[]
   onSaveChat?: (chat: unknown) => void
@@ -241,6 +254,9 @@ function renderWorkspace({
   pages = [],
   onRunPage,
   onBuild,
+  onExport,
+  onReplace,
+  missingColumns = [],
   project: existing,
   saved = [],
   onSaveChat,
@@ -289,6 +305,9 @@ function renderWorkspace({
         blocks: blocksOf(page).flatMap((block) =>
           block.sql ? [pageResult(block)] : []
         ),
+        dataThrough: page.filters.some(({ kind }) => kind === "dates")
+          ? "2026-04-30"
+          : null,
         filters: page.filters.flatMap((filter) =>
           filter.values.length > 0 || filter.from
             ? [{ id: filter.id, files: ["sales.csv", "orders.csv"] }]
@@ -318,6 +337,15 @@ function renderWorkspace({
       }
     }
     if (command === "filter_bounds") return ["2026-01-01", "2026-04-30"]
+    if (command === "export_page") {
+      onExport?.(payload)
+      return "/docs/Overview.pdf"
+    }
+    if (command === "check_replacement") return { missingColumns }
+    if (command === "replace_project_file") {
+      onReplace?.(payload)
+      return openTable?.()
+    }
     if (command === "filter_options") return ["EMEA", "APAC"]
     if (command === "data_files_in") return payload.paths
     if (command === "check_data_file") return openTable?.()
@@ -1557,6 +1585,105 @@ test("a block can go to the AI with a question about it", async () => {
   expect(ask.mock.calls[0][0]).toMatchObject({
     request: { activePage: "page-1", activeBlock: "b1" },
   })
+})
+
+test("Present fills the screen and Escape brings the Page back", async () => {
+  renderWorkspace(pageBackend())
+  await openOverview()
+
+  await userEvent.click(await screen.findByRole("button", { name: "Present" }))
+
+  expect(
+    await screen.findByRole("dialog", { name: "Presenting Overview" })
+  ).toBeTruthy()
+  expect(setFullscreen).toHaveBeenLastCalledWith(true)
+
+  await userEvent.keyboard("{Escape}")
+
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "Presenting Overview" })
+    ).toBeNull()
+  )
+  expect(setFullscreen).toHaveBeenLastCalledWith(false)
+})
+
+test("exporting draws a sheet and saves what it captured", async () => {
+  const onExport = vi.fn()
+  renderWorkspace(pageBackend({ onExport }))
+  await openOverview()
+  await screen.findByText("That query failed.")
+
+  await userEvent.click(screen.getByRole("button", { name: "Export" }))
+  await userEvent.click(
+    await screen.findByRole("menuitem", { name: "PNG image" })
+  )
+
+  await waitFor(() =>
+    expect(onExport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Overview",
+        format: "png",
+        images: [expect.objectContaining({ width: 1 })],
+      })
+    )
+  )
+  expect(
+    await screen.findByRole("button", { name: "Saved. Show file" })
+  ).toBeTruthy()
+  expect(screen.queryByTestId("export-sheet")).toBeNull()
+})
+
+test("a Page with a date filter says how recent its data is", async () => {
+  const dated = {
+    ...structuredClone(OVERVIEW),
+    filters: [{ ...OVERVIEW.filters[0], kind: "dates" }],
+  }
+  renderWorkspace(pageBackend({ pages: [dated] }))
+
+  await openOverview()
+
+  expect(await screen.findByText("Data through 2026-04-30")).toBeTruthy()
+})
+
+test("replacing a file runs an open Page again on the new data", async () => {
+  const onReplace = vi.fn()
+  const onRunPage = vi.fn()
+  renderWorkspace(pageBackend({ onReplace, onRunPage }))
+  await openOverview()
+  await screen.findByText("That query failed.")
+  chooseFile.mockResolvedValue("/data/sales-may.csv")
+
+  await userEvent.click(
+    screen.getByRole("button", { name: "Replace sales.csv" })
+  )
+
+  await waitFor(() =>
+    expect(onReplace).toHaveBeenCalledWith({
+      project: "/docs/Q3",
+      name: "sales.csv",
+      path: "/data/sales-may.csv",
+    })
+  )
+  await waitFor(() => expect(onRunPage).toHaveBeenCalledTimes(2))
+})
+
+test("a new file missing columns is only used after a warning", async () => {
+  const onReplace = vi.fn()
+  renderWorkspace(pageBackend({ onReplace, missingColumns: ["amount"] }))
+  await openOverview()
+  chooseFile.mockResolvedValue("/data/sales-may.csv")
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Replace sales.csv" })
+  )
+
+  expect(await screen.findByText(/doesn't have amount/)).toBeTruthy()
+  expect(onReplace).not.toHaveBeenCalled()
+
+  await userEvent.click(screen.getByRole("button", { name: "Replace file" }))
+
+  await waitFor(() => expect(onReplace).toHaveBeenCalled())
 })
 
 test("deleting a Page asks first and leaves the data", async () => {

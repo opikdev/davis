@@ -31,6 +31,7 @@ export function usePage(
   const [page, setPage] = useState<Page>()
   const [results, setResults] = useState<Record<string, BlockResult>>({})
   const [reach, setReach] = useState<Record<string, string[]>>({})
+  const [dataThrough, setDataThrough] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string>()
   const [isEditing, setIsEditing] = useState(false)
@@ -62,6 +63,7 @@ export function usePage(
             finished.filters.map(({ id, files }) => [id, files])
           )
         )
+        setDataThrough(finished.dataThrough)
         setError(undefined)
       } catch (failure) {
         if (thisRun === latestRun.current) setError(toErrorMessage(failure))
@@ -335,6 +337,7 @@ export function usePage(
     page,
     results,
     reach,
+    dataThrough,
     isLoading,
     error,
     isEditing,

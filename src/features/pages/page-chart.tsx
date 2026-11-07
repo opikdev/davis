@@ -29,8 +29,7 @@ const LONG_LABEL = 7
 const MANY_BARS = 12
 const MANY_LINE_LABELS = 12
 const MAX_BAR_SIZE = 28
-const AXIS_CHAR_WIDTH = 6
-const LINE_EDGE_SPACE = 20
+const CHAR_WIDTH = 7
 const SERIES_COLORS = 5
 const axisText = { fontSize: 11, fill: "var(--subtle)" }
 
@@ -101,8 +100,9 @@ export function PageChart({ block, result, onSelect }: PageChartProps) {
     ...point,
     note: named.has(index) ? format(values[index]) : "",
   }))
-  const axisWidth =
-    (format(Math.max(...values)).length + 1) * AXIS_CHAR_WIDTH + 4
+  const longestValue = format(Math.max(...values)).length
+  const axisWidth = (longestValue + 1) * CHAR_WIDTH
+  const edgeSpace = (longestValue * CHAR_WIDTH) / 2
   const config: ChartConfig = Object.fromEntries(
     keys.map((key, index) => [
       key,
@@ -139,9 +139,7 @@ export function PageChart({ block, result, onSelect }: PageChartProps) {
       axisLine={false}
       tick={axisText}
       minTickGap={16}
-      padding={
-        isLine ? { left: LINE_EDGE_SPACE, right: LINE_EDGE_SPACE } : undefined
-      }
+      padding={isLine ? { left: edgeSpace, right: edgeSpace } : undefined}
     />
   )
   const tooltip = (
@@ -196,9 +194,9 @@ export function PageChart({ block, result, onSelect }: PageChartProps) {
           <Line
             dataKey="value"
             type="linear"
-            stroke="var(--color-value)"
+            stroke="var(--chart-1)"
             strokeWidth={2}
-            dot={{ r: 3, fill: "var(--color-value)" }}
+            dot={{ r: 3, fill: "var(--chart-1)" }}
             isAnimationActive={false}
           >
             {labels && lineLabel}
@@ -213,8 +211,8 @@ export function PageChart({ block, result, onSelect }: PageChartProps) {
           <Area
             dataKey="value"
             type="linear"
-            stroke="var(--color-value)"
-            fill="var(--color-value)"
+            stroke="var(--chart-1)"
+            fill="var(--chart-1)"
             fillOpacity={0.15}
             strokeWidth={2}
             isAnimationActive={false}
@@ -249,7 +247,7 @@ export function PageChart({ block, result, onSelect }: PageChartProps) {
               ...point,
               label: Number(point.label),
             }))}
-            fill="var(--color-value)"
+            fill="var(--chart-1)"
             isAnimationActive={false}
           />
         </ScatterChart>
@@ -292,7 +290,7 @@ export function PageChart({ block, result, onSelect }: PageChartProps) {
           {tooltip}
           <Bar
             dataKey="value"
-            fill="var(--color-value)"
+            fill="var(--chart-1)"
             maxBarSize={MAX_BAR_SIZE}
             radius={4}
             isAnimationActive={false}
@@ -317,7 +315,7 @@ export function PageChart({ block, result, onSelect }: PageChartProps) {
           {tooltip}
           <Bar
             dataKey="value"
-            fill="var(--color-value)"
+            fill="var(--chart-1)"
             maxBarSize={MAX_BAR_SIZE * 2}
             radius={[4, 4, 0, 0]}
             isAnimationActive={false}

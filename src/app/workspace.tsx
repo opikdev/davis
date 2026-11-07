@@ -45,6 +45,7 @@ import {
 } from "@/features/chat"
 import {
   chooseFiles,
+  chooseReplacement,
   DataView,
   fileName,
   useOpenTable,
@@ -61,10 +62,13 @@ import {
 } from "@/features/pages"
 import {
   addProjectFile,
+  checkReplacement,
+  ConfirmRemoval,
   checkDataFile,
   dataFilesIn,
   LinkedFiles,
   removeProjectFile,
+  replaceProjectFile,
   useProject,
   type ChatSummary,
   type PageSummary,
@@ -281,6 +285,11 @@ export function Workspace() {
   }, [reloadPage])
   const onPageChanged = useCallback(() => void reloadRef.current(), [])
   const [askedBlockId, setAskedBlockId] = useState<string>()
+  const [replacement, setReplacement] = useState<{
+    file: ProjectFile
+    path: string
+    missingColumns: string[]
+  }>()
   const pageRows = view === "page" ? pages.page?.rows : undefined
   const askedBlock = pageRows && findBlock(pageRows, askedBlockId)
   const chat = useChat(
@@ -429,6 +438,39 @@ export function Workspace() {
     void files.open(file.path)
   }
 
+  async function applyReplacement(file: ProjectFile, path: string) {
+    if (!project) return
+    setReplacement(undefined)
+    await replaceProjectFile(project.path, file.name, path)
+    await refresh(project.path)
+    if (files.table?.name === file.name) {
+      files.close()
+      await files.open(file.path)
+    }
+    if (pages.page) await reloadPage()
+  }
+
+  async function replaceFile(file: ProjectFile) {
+    if (!project) return
+    const path = await chooseReplacement(file.name)
+    if (!path) return
+    const { missingColumns } = await checkReplacement(
+      project.path,
+      file.name,
+      path
+    )
+    if (missingColumns.length > 0) {
+      setReplacement({ file, path, missingColumns })
+    } else {
+      await applyReplacement(file, path)
+    }
+  }
+
+  function reportReplaceFailure(failure: unknown) {
+    setProjectError(toErrorMessage(failure))
+    setView("home")
+  }
+
   async function removeFile(file: ProjectFile) {
     if (!project) return
     await removeProjectFile(project.path, file.name)
@@ -498,11 +540,27 @@ export function Workspace() {
         onViewChange={setView}
         onAddFiles={() => void browse()}
         onOpenFile={openFile}
+        onReplaceFile={(file) =>
+          void replaceFile(file).catch(reportReplaceFailure)
+        }
         onRemoveFile={(file) => void removeFile(file)}
         onNewChat={startChat}
         onOpenChat={(summary) => void openChat(summary)}
         onDeleteChat={(summary) => void removeChat(summary)}
       />
+      {replacement && (
+        <ConfirmRemoval
+          title={`Replace ${replacement.file.name}?`}
+          description={`The new file doesn't have ${replacement.missingColumns.join(", ")}. Blocks that use these columns will show an error until you change them.`}
+          action="Replace file"
+          onConfirm={() =>
+            void applyReplacement(replacement.file, replacement.path).catch(
+              reportReplaceFailure
+            )
+          }
+          onClose={() => setReplacement(undefined)}
+        />
+      )}
       <SidebarInset className="min-h-0 overflow-hidden bg-transparent md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:border-0">
         <ResizablePanelGroup
           orientation="horizontal"

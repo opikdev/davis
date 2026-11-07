@@ -115,10 +115,11 @@ type PageGridProps = {
   results: Record<string, BlockResult>
   isEditing: boolean
   selectedId?: string
-  onMove: (id: string, target: DropTarget) => void
-  onSelect: (id: string) => void
-  onRemove: (id: string) => void
-  onTextChange: (id: string, text: string) => void
+  isExporting?: boolean
+  onMove?: (id: string, target: DropTarget) => void
+  onSelect?: (id: string) => void
+  onRemove?: (id: string) => void
+  onTextChange?: (id: string, text: string) => void
   onSelectValue?: (column: string, value: string, grain?: Grain) => void
 }
 
@@ -127,6 +128,7 @@ export function PageGrid({
   results,
   isEditing,
   selectedId,
+  isExporting,
   onMove,
   onSelect,
   onRemove,
@@ -143,7 +145,7 @@ export function PageGrid({
   function finish({ active, over }: DragEndEvent) {
     setIsDragging(false)
     const target = over?.data.current as DropTarget | undefined
-    if (target) onMove(String(active.id), target)
+    if (target) onMove?.(String(active.id), target)
   }
 
   const blockProps = (block: Block) => ({
@@ -151,9 +153,10 @@ export function PageGrid({
     outcome: results[block.id],
     isEditing,
     isSelected: selectedId === block.id,
-    onSelect: () => onSelect(block.id),
-    onRemove: () => onRemove(block.id),
-    onTextChange: (text: string) => onTextChange(block.id, text),
+    isExporting,
+    onSelect: () => onSelect?.(block.id),
+    onRemove: () => onRemove?.(block.id),
+    onTextChange: (text: string) => onTextChange?.(block.id, text),
     onSelectValue,
   })
 

@@ -1,5 +1,5 @@
 import type { QueryResult } from "@/features/chat"
-import type { Block } from "@/features/pages/api"
+import type { Block, BlockResult, PageFilter } from "@/features/pages/api"
 
 export const FORMATS = [
   { value: "number", label: "Number" },
@@ -87,6 +87,22 @@ export function latestChange(trend: QueryResult | null): Change | undefined {
 }
 
 export const DAY_LENGTH = "2026-01-01".length
+
+export function filterSummary({ column, kind, values, from, to }: PageFilter) {
+  if (values.length > 0) return `${column}: ${values.join(", ")}`
+  if (kind !== "dates" || (!from && !to)) return undefined
+  return `${column}: ${[from, to].filter(Boolean).join(" to ")}`
+}
+
+export function dataThroughLabel(
+  dataThrough: string | null,
+  outcomes: BlockResult[]
+) {
+  const latest =
+    dataThrough ??
+    outcomes.map(({ trend }) => latestChange(trend)?.period).find(Boolean)
+  return latest && `Data through ${latest.slice(0, DAY_LENGTH)}`
+}
 
 export function shiftDays(day: string, days: number) {
   const date = new Date(`${day}T00:00:00Z`)

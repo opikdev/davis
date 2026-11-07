@@ -13,6 +13,7 @@ name = "davis_lib"
 tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
+base64 = "0.22"
 davis-agent = { path = "../crates/agent" }
 davis-ai = { path = "../crates/ai" }
 davis-core = { path = "../crates/core" }

@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 calamine = { version = "0.38.0", features = ["dates"] }
 chrono = { version = "0.4", default-features = false, features = ["alloc"] }
+pdf-writer = "0.15"
 serde.workspace = true
 serde_json = "1"
 thiserror.workspace = true

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use davis_agent::{DraftKind, DraftSource};
+use davis_agent::{DraftKind, DraftSource, ProjectTable};
 use davis_core::{
     BuiltQuery, Column, FilterRule, LinkedFilter, OpenedTable, QueryResult, QuerySpec, QueryTable,
     TableFilter, TableSource,
@@ -115,6 +115,53 @@ pub async fn add_project_file(project: String, path: String) -> Result<OpenedTab
         davis_core::open_table(&path)?;
         let added = davis_project::add_file(folder, file)?;
         Ok(davis_core::open_table(&added.path)?)
+    })
+    .await?
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Replacement {
+    missing_columns: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn check_replacement(
+    project: String,
+    name: String,
+    path: String,
+) -> Result<Replacement, AppError> {
+    spawn_blocking(move || {
+        let source = Path::new(&path);
+        davis_project::check_same_kind(&name, source)?;
+        let current = davis_project::read_project(Path::new(&project))?
+            .files
+            .into_iter()
+            .find(|file| file.name == name)
+            .ok_or(davis_project::Error::MissingItem)?;
+        let current = davis_core::open_table(&current.path)?;
+        let next = davis_core::open_table(&path)?;
+        let missing_columns = current
+            .columns
+            .into_iter()
+            .map(|column| column.name)
+            .filter(|column| !next.columns.iter().any(|kept| &kept.name == column))
+            .collect();
+        Ok(Replacement { missing_columns })
+    })
+    .await?
+}
+
+#[tauri::command]
+pub async fn replace_project_file(
+    project: String,
+    name: String,
+    path: String,
+) -> Result<OpenedTable, AppError> {
+    spawn_blocking(move || {
+        davis_core::open_table(&path)?;
+        let replaced = davis_project::replace_file(Path::new(&project), &name, Path::new(&path))?;
+        Ok(davis_core::open_table(&replaced.path)?)
     })
     .await?
 }
@@ -271,6 +318,7 @@ pub struct FilterReach {
 pub struct PageRun {
     blocks: Vec<BlockResult>,
     filters: Vec<FilterReach>,
+    data_through: Option<String>,
 }
 
 fn rule_of(filter: &PageFilter) -> Option<FilterRule> {
@@ -356,11 +404,25 @@ fn run_block(tables: &[QueryTable], block: &Block) -> BlockResult {
     }
 }
 
+fn latest_date(page: &Page, tables: &[ProjectTable]) -> Option<String> {
+    page.filters
+        .iter()
+        .filter(|filter| filter.kind == FilterKind::Dates)
+        .find_map(|filter| {
+            let table = tables
+                .iter()
+                .find(|table| table.opened.name == filter.table)?;
+            let bounds = davis_core::column_bounds(&table.opened.source, &filter.column);
+            Some(bounds.ok()??.1)
+        })
+}
+
 // Each block runs on its own, so one bad query shows in its block and the rest still load.
 #[tauri::command]
 pub async fn run_page(project: String, page: Page) -> Result<PageRun, AppError> {
     spawn_blocking(move || {
         let project_tables = project_tables(Path::new(&project))?;
+        let data_through = latest_date(&page, &project_tables);
         let files: Vec<String> = project_tables
             .iter()
             .map(|table| table.opened.name.clone())
@@ -376,7 +438,11 @@ pub async fn run_page(project: String, page: Page) -> Result<PageRun, AppError> 
             .flat_map(|row| &row.blocks)
             .map(|block| run_block(&tables, block))
             .collect();
-        Ok(PageRun { blocks, filters })
+        Ok(PageRun {
+            blocks,
+            filters,
+            data_through,
+        })
     })
     .await?
 }

@@ -31,6 +31,14 @@ export async function chooseFiles() {
   return paths ?? []
 }
 
+export async function chooseReplacement(name: string) {
+  return chooseFile({
+    filters: [
+      { name: "Data files", extensions: [name.split(".").pop() ?? ""] },
+    ],
+  })
+}
+
 export function useOpenTable() {
   const [table, setTable] = useState<OpenedTable>()
   const [openingName, setOpeningName] = useState<string>()

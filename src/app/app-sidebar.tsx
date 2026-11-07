@@ -5,6 +5,7 @@ import {
   File02Icon,
   Home01Icon,
   Message01Icon,
+  RepeatIcon,
   Settings01Icon,
 } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react"
@@ -66,6 +67,7 @@ type AppSidebarProps = Pick<
   onViewChange: (view: View) => void
   onAddFiles: () => void
   onOpenFile: (file: ProjectFile) => void
+  onReplaceFile: (file: ProjectFile) => void
   onRemoveFile: (file: ProjectFile) => void
   onNewChat: () => void
   onOpenChat: (chat: ChatSummary) => void
@@ -89,6 +91,7 @@ export function AppSidebar({
   onViewChange,
   onAddFiles,
   onOpenFile,
+  onReplaceFile,
   onRemoveFile,
   onNewChat,
   onOpenChat,
@@ -189,11 +192,22 @@ export function AppSidebar({
                     <SidebarMenuButton
                       title={file.name}
                       isActive={view === "data" && file.name === activeFile}
+                      className="group-hover/menu-item:pr-13"
                       onClick={() => onOpenFile(file)}
                     >
                       <HugeiconsIcon icon={File02Icon} strokeWidth={1.5} />
                       <span className="truncate">{file.name}</span>
                     </SidebarMenuButton>
+                    <SidebarMenuAction
+                      showOnHover
+                      aria-label={`Replace ${file.name}`}
+                      title={`Replace ${file.name} with a newer file`}
+                      disabled={isBusy}
+                      className="right-6"
+                      onClick={() => onReplaceFile(file)}
+                    >
+                      <HugeiconsIcon icon={RepeatIcon} strokeWidth={1.5} />
+                    </SidebarMenuAction>
                     <SidebarMenuAction
                       showOnHover
                       aria-label={`Remove ${file.name}`}

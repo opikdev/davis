@@ -12,6 +12,8 @@ pub enum Error {
     UnreadableWorkbook(String),
     #[error("{0} has no data in it.")]
     EmptyWorkbook(String),
+    #[error("Choose a {0} file to replace {1}.")]
+    WrongFileKind(String, String),
     #[error("Davis couldn't update the project folder: {0}")]
     Storage(#[from] std::io::Error),
     #[error("Davis couldn't save that: {0}")]
@@ -27,6 +29,7 @@ impl Error {
             Self::MissingItem => "missing-item",
             Self::UnreadableWorkbook(_) => "unreadable-workbook",
             Self::EmptyWorkbook(_) => "empty-workbook",
+            Self::WrongFileKind(..) => "wrong-file-kind",
             Self::Storage(_) => "project-storage",
             Self::Encoding(_) => "project-encoding",
         }

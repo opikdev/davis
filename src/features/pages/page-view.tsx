@@ -1,16 +1,20 @@
 import {
   Add01Icon,
+  ArrowDown01Icon,
   ArrowTurnBackwardIcon,
   ArrowTurnForwardIcon,
   ChartBarLineIcon,
+  Download01Icon,
   Note01Icon,
+  PresentationBarChart01Icon,
   Table01Icon,
   Tick02Icon,
   PencilEdit02Icon,
   HashtagIcon,
 } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react"
-import { useEffect } from "react"
+import { revealItemInDir } from "@tauri-apps/plugin-opener"
+import { useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -24,14 +28,20 @@ import {
   buildBlockQuery,
   projectColumns,
   type Block,
+  type ExportFormat,
   type Grain,
 } from "@/features/pages/api"
 import { defaultSpec } from "@/features/pages/block-settings"
 import { clickedFilter } from "@/features/pages/clicked-filter"
+import { ExportSheet } from "@/features/pages/export-sheet"
 import { FilterBar } from "@/features/pages/filter-bar"
+import { dataThroughLabel } from "@/features/pages/format"
 import { PageGrid } from "@/features/pages/page-grid"
+import { PresentView } from "@/features/pages/present-view"
 import { StartingPoints } from "@/features/pages/starting-points"
 import type { usePage } from "@/features/pages/use-page"
+
+const SAVED_NOTE_MS = 8000
 
 const NEW_BLOCKS: {
   label: string
@@ -54,6 +64,16 @@ export function PageView({ project, pages, hasData, isLocked }: PageViewProps) {
   const { page, results, reach, error, isEditing, selectedId, clicked } = pages
   const { undo, redo } = pages
   const canEdit = isEditing && !isLocked
+  const [isPresenting, setIsPresenting] = useState(false)
+  const [exporting, setExporting] = useState<ExportFormat>()
+  const [savedPath, setSavedPath] = useState<string>()
+  const [exportError, setExportError] = useState<string>()
+
+  useEffect(() => {
+    if (!savedPath) return
+    const timer = setTimeout(() => setSavedPath(undefined), SAVED_NOTE_MS)
+    return () => clearTimeout(timer)
+  }, [savedPath])
 
   useEffect(() => {
     if (!canEdit) return
@@ -100,6 +120,15 @@ export function PageView({ project, pages, hasData, isLocked }: PageViewProps) {
   }
 
   const isEmpty = page.rows.length === 0
+  const through = dataThroughLabel(pages.dataThrough, Object.values(results))
+  const selectChartValue = (column: string, value: string, grain?: Grain) =>
+    void selectValue(column, value, grain)
+
+  function startExport(format: ExportFormat) {
+    setSavedPath(undefined)
+    setExportError(undefined)
+    setExporting(format)
+  }
 
   return (
     <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col gap-2 overflow-x-hidden overflow-y-auto">
@@ -175,6 +204,62 @@ export function PageView({ project, pages, hasData, isLocked }: PageViewProps) {
             </DropdownMenu>
           </>
         )}
+        {savedPath && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="min-w-0 font-normal"
+            onClick={() => {
+              revealItemInDir(savedPath).catch((failure: unknown) =>
+                console.error("Could not show the saved file", failure)
+              )
+            }}
+          >
+            <span className="truncate">Saved. Show file</span>
+          </Button>
+        )}
+        {!canEdit && !isEmpty && (
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsPresenting(true)}
+            >
+              <HugeiconsIcon
+                icon={PresentationBarChart01Icon}
+                strokeWidth={1.5}
+                data-icon="inline-start"
+              />
+              Present
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                disabled={Boolean(exporting)}
+                render={<Button variant="outline" size="sm" />}
+              >
+                <HugeiconsIcon
+                  icon={Download01Icon}
+                  strokeWidth={1.5}
+                  data-icon="inline-start"
+                />
+                {exporting ? "Exporting" : "Export"}
+                <HugeiconsIcon
+                  icon={ArrowDown01Icon}
+                  strokeWidth={1.5}
+                  className="size-3 text-subtle"
+                />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-36">
+                <DropdownMenuItem onClick={() => startExport("pdf")}>
+                  PDF document
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => startExport("png")}>
+                  PNG image
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        )}
         <Button
           variant={canEdit ? "default" : "outline"}
           size="sm"
@@ -202,9 +287,12 @@ export function PageView({ project, pages, hasData, isLocked }: PageViewProps) {
           pages.setClickedFilters(clicked.filter((item) => item.id !== id))
         }
       />
-      {error && (
+      {through && !canEdit && (
+        <p className="-mt-1.5 shrink-0 px-3 text-xs text-subtle">{through}</p>
+      )}
+      {(error ?? exportError) && (
         <p role="alert" className="px-3 text-destructive select-text">
-          {error}
+          {error ?? exportError}
         </p>
       )}
       {isEmpty && !canEdit ? (
@@ -223,9 +311,33 @@ export function PageView({ project, pages, hasData, isLocked }: PageViewProps) {
           onSelect={pages.select}
           onRemove={pages.removeBlock}
           onTextChange={(id, text) => pages.updateBlock(id, { text })}
-          onSelectValue={(column, value, grain) =>
-            void selectValue(column, value, grain)
-          }
+          onSelectValue={selectChartValue}
+        />
+      )}
+      {isPresenting && (
+        <PresentView
+          project={project}
+          pages={pages}
+          through={through}
+          onSelectValue={selectChartValue}
+          onExit={() => setIsPresenting(false)}
+        />
+      )}
+      {exporting && (
+        <ExportSheet
+          page={page}
+          results={results}
+          clicked={clicked}
+          through={through}
+          format={exporting}
+          onSaved={(path) => {
+            setExporting(undefined)
+            setSavedPath(path ?? undefined)
+          }}
+          onFailed={(message) => {
+            setExporting(undefined)
+            setExportError(message)
+          }}
         />
       )}
     </div>

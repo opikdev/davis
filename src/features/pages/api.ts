@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core"
+import { getCurrentWindow } from "@tauri-apps/api/window"
 
 import type { QueryResult } from "@/features/chat"
 
@@ -75,6 +76,7 @@ export type BlockResult = {
 export type PageRun = {
   blocks: BlockResult[]
   filters: { id: string; files: string[] }[]
+  dataThrough: string | null
 }
 
 export type ProjectColumns = {
@@ -91,6 +93,26 @@ export type BuiltQuery = {
 }
 
 export type DraftKind = "overview" | "trends" | "compare" | "report"
+
+export type ExportFormat = "pdf" | "png"
+
+export type ExportImage = {
+  data: string
+  width: number
+  height: number
+}
+
+export function exportPage(
+  title: string,
+  format: ExportFormat,
+  images: ExportImage[]
+) {
+  return invoke<string | null>("export_page", { title, format, images })
+}
+
+export function setFullscreen(isFullscreen: boolean) {
+  return getCurrentWindow().setFullscreen(isFullscreen)
+}
 
 export function savePage(project: string, page: Page) {
   return invoke<void>("save_page", { project, page })
