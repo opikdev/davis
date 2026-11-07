@@ -26,6 +26,8 @@ pub enum Error {
     InstallFailed { name: String, detail: String },
     #[error("{0} finished installing, but Davis can't find it")]
     NotDetectedAfterInstall(String),
+    #[error("Could not list the models for {0}")]
+    ModelsUnavailable(String),
     #[error("Could not open Terminal: {0}")]
     Terminal(String),
     #[error("Could not use the system keychain: {0}")]
@@ -50,6 +52,7 @@ impl Error {
             Self::InstallPermission(_) => "install-permission",
             Self::InstallFailed { .. } => "install-failed",
             Self::NotDetectedAfterInstall(_) => "not-detected-after-install",
+            Self::ModelsUnavailable(_) => "models-unavailable",
             Self::Terminal(_) => "terminal",
             Self::Keychain(_) => "keychain",
             Self::Settings(_) => "settings",

@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use reqwest::StatusCode;
-use reqwest::blocking::{Client, RequestBuilder};
+use reqwest::blocking::{Client, RequestBuilder, Response};
 use reqwest::redirect::Policy;
 use serde::{Deserialize, Serialize};
 use url::{Host, Url};
@@ -108,13 +108,16 @@ pub(crate) fn check_endpoint(
     if api_key.is_some_and(|key| key.chars().any(char::is_control)) {
         return Err(Error::RejectedKey);
     }
-    let target = endpoint_url(provider, api_key, url)?;
+    fetch(provider, endpoint_url(provider, api_key, url)?, api_key).map(|_| ())
+}
+
+pub(crate) fn fetch(provider: &Provider, target: Url, api_key: Option<&str>) -> Result<Response> {
     let client = client_for(&target).map_err(|_| Error::Unreachable)?;
     let request = authorize(client.get(target), provider.auth, api_key);
     let response = request.send().map_err(|_| Error::Unreachable)?;
 
     match response.status() {
-        status if status.is_success() => Ok(()),
+        status if status.is_success() => Ok(response),
         StatusCode::BAD_REQUEST | StatusCode::UNAUTHORIZED => Err(Error::RejectedKey),
         StatusCode::FORBIDDEN => Err(Error::KeyNotAllowed),
         StatusCode::NOT_FOUND => Err(Error::BadAddress(provider.name.clone())),
@@ -135,6 +138,19 @@ fn client_for(target: &Url) -> reqwest::Result<Client> {
         builder.no_proxy().build()
     } else {
         builder.build()
+    }
+}
+
+pub(crate) fn models_url(
+    provider: &Provider,
+    api_key: Option<&str>,
+    url: Option<&str>,
+) -> Result<Url> {
+    match &provider.models_url {
+        Some(models_url) => {
+            Url::parse(models_url).map_err(|_| Error::BadAddress(models_url.clone()))
+        }
+        None => endpoint_url(provider, api_key, url),
     }
 }
 

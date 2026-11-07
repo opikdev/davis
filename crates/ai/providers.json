@@ -17,7 +17,8 @@
     "icon": "anthropic",
     "keyUrl": "https://platform.claude.com/settings/keys",
     "testUrl": "https://api.anthropic.com/v1/models",
-    "auth": "x-api-key"
+    "auth": "x-api-key",
+    "modelsUrl": "https://api.anthropic.com/v1/models?limit=1000"
   },
   {
     "id": "google-gemini",
@@ -147,7 +148,8 @@
     "icon": "deepinfra",
     "keyUrl": "https://deepinfra.com/dash/api_keys",
     "testUrl": "https://api.deepinfra.com/v1/me",
-    "auth": "bearer"
+    "auth": "bearer",
+    "modelsUrl": "https://api.deepinfra.com/v1/openai/models"
   },
   {
     "id": "perplexity",
@@ -285,7 +287,57 @@
     "binary": "claude",
     "signInCommand": "claude auth login",
     "installCommand": "curl -fsSL https://claude.ai/install.sh | bash",
-    "installCommandWindows": "irm https://claude.ai/install.ps1 | iex"
+    "installCommandWindows": "irm https://claude.ai/install.ps1 | iex",
+    "models": [
+      {
+        "id": "claude-opus-5-5",
+        "name": "Claude Opus 5.5",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "defaultEffort": "medium"
+      },
+      {
+        "id": "claude-sonnet-5-5",
+        "name": "Claude Sonnet 5.5",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "defaultEffort": "medium"
+      },
+      {
+        "id": "claude-fable-5-1",
+        "name": "Claude Fable 5.1",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "defaultEffort": "medium"
+      },
+      {
+        "id": "claude-haiku-5-5",
+        "name": "Claude Haiku 5.5",
+        "efforts": [
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max"
+        ],
+        "defaultEffort": "medium"
+      }
+    ]
   },
   {
     "id": "codex",
@@ -320,7 +372,8 @@
     "icon": "openrouter",
     "keyUrl": "https://openrouter.ai/keys",
     "testUrl": "https://openrouter.ai/api/v1/key",
-    "auth": "bearer"
+    "auth": "bearer",
+    "modelsUrl": "https://openrouter.ai/api/v1/models"
   },
   {
     "id": "litellm-proxy",
@@ -354,7 +407,8 @@
     "icon": "vercel",
     "keyUrl": "https://vercel.com/ai-gateway",
     "testUrl": "https://ai-gateway.vercel.sh/v1/credits",
-    "auth": "bearer"
+    "auth": "bearer",
+    "modelsUrl": "https://ai-gateway.vercel.sh/v1/models"
   },
   {
     "id": "cloudflare",

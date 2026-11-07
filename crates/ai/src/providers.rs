@@ -2,6 +2,8 @@ use std::sync::OnceLock;
 
 use serde::Deserialize;
 
+use crate::models::Model;
+
 const PROVIDERS_JSON: &str = include_str!("../providers.json");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -32,6 +34,9 @@ pub struct Provider {
     pub auth: Option<Auth>,
     pub test_url: Option<String>,
     pub test_path: Option<String>,
+    pub models_url: Option<String>,
+    #[serde(default)]
+    pub models: Vec<Model>,
     pub default_url: Option<String>,
     pub binary: Option<String>,
     pub install_command: Option<String>,
@@ -72,7 +77,10 @@ mod tests {
     #[test]
     fn hosted_providers_only_test_over_https() {
         for provider in providers() {
-            if let Some(url) = &provider.test_url {
+            for url in [&provider.test_url, &provider.models_url]
+                .into_iter()
+                .flatten()
+            {
                 assert!(url.starts_with("https://"), "{} uses {url}", provider.id);
             }
         }

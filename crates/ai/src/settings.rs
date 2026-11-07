@@ -14,6 +14,16 @@ static UPDATES: Mutex<()> = Mutex::new(());
 pub struct Settings {
     pub onboarding_complete: bool,
     pub connections: Vec<SavedConnection>,
+    pub chosen_model: Option<ChosenModel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChosenModel {
+    pub provider_id: String,
+    pub model_id: String,
+    pub model_name: String,
+    pub effort: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +78,13 @@ impl Settings {
     pub fn forget(&mut self, provider_id: &str) {
         self.connections
             .retain(|saved| saved.provider_id != provider_id);
+        if self
+            .chosen_model
+            .as_ref()
+            .is_some_and(|chosen| chosen.provider_id == provider_id)
+        {
+            self.chosen_model = None;
+        }
     }
 }
 
@@ -89,6 +106,54 @@ mod tests {
             provider_id: provider_id.to_owned(),
             url: url.map(str::to_owned),
         }
+    }
+
+    fn chosen(provider_id: &str) -> ChosenModel {
+        ChosenModel {
+            provider_id: provider_id.to_owned(),
+            model_id: "model".to_owned(),
+            model_name: "Model".to_owned(),
+            effort: Some("high".to_owned()),
+        }
+    }
+
+    #[test]
+    fn the_chosen_model_loads_back() {
+        let path = temporary_path("chosen-model");
+        let settings = Settings {
+            chosen_model: Some(chosen("codex")),
+            ..Settings::default()
+        };
+        settings.save(&path).unwrap();
+
+        assert_eq!(
+            Settings::load(&path).unwrap().chosen_model,
+            Some(chosen("codex"))
+        );
+    }
+
+    #[test]
+    fn disconnecting_clears_that_provider_s_chosen_model() {
+        let mut settings = Settings {
+            chosen_model: Some(chosen("codex")),
+            ..Settings::default()
+        };
+
+        settings.forget("codex");
+
+        assert_eq!(settings.chosen_model, None);
+    }
+
+    #[test]
+    fn disconnecting_another_provider_keeps_the_chosen_model() {
+        let mut settings = Settings {
+            chosen_model: Some(chosen("codex")),
+            ..Settings::default()
+        };
+
+        settings.forget("openai");
+
+        assert_eq!(settings.chosen_model, Some(chosen("codex")));
     }
 
     #[test]

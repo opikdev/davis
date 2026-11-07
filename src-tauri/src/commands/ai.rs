@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use davis_ai::{AppStatus, Connection, ConnectionRequest, Detected, Settings};
+use davis_ai::{AppStatus, ChosenModel, Connection, ConnectionRequest, Detected, Model, Settings};
 use serde::Serialize;
 use tauri::async_runtime::spawn_blocking;
 use tauri::ipc::Channel;
@@ -32,6 +32,39 @@ pub async fn connect_provider(
 ) -> Result<Connection, AppError> {
     let path = settings_path(&app)?;
     Ok(spawn_blocking(move || davis_ai::connect(request, &path)).await??)
+}
+
+#[tauri::command]
+pub async fn connected_providers(app: AppHandle) -> Result<Vec<String>, AppError> {
+    let path = settings_path(&app)?;
+    let settings = spawn_blocking(move || Settings::load(&path)).await??;
+    Ok(settings
+        .connections
+        .into_iter()
+        .map(|connection| connection.provider_id)
+        .collect())
+}
+
+#[tauri::command]
+pub async fn list_models(app: AppHandle, provider_id: String) -> Result<Vec<Model>, AppError> {
+    let path = settings_path(&app)?;
+    Ok(spawn_blocking(move || davis_ai::list_models(&provider_id, &path)).await??)
+}
+
+#[tauri::command]
+pub async fn chosen_model(app: AppHandle) -> Result<Option<ChosenModel>, AppError> {
+    let path = settings_path(&app)?;
+    let settings = spawn_blocking(move || Settings::load(&path)).await??;
+    Ok(settings.chosen_model)
+}
+
+#[tauri::command]
+pub async fn choose_model(app: AppHandle, choice: ChosenModel) -> Result<(), AppError> {
+    let path = settings_path(&app)?;
+    Ok(spawn_blocking(move || {
+        Settings::update(&path, |settings| settings.chosen_model = Some(choice))
+    })
+    .await??)
 }
 
 #[tauri::command]
