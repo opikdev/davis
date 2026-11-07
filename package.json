@@ -14,7 +14,7 @@
     "test": "vitest run",
     "tauri": "tauri",
     "icons": "tauri icon src-tauri/icons/source/desktop.svg -o target/icons/desktop && tauri icon src-tauri/icons/source/macos.svg -o target/icons/macos && cp target/icons/desktop/*.png target/icons/desktop/icon.ico target/icons/macos/icon.icns src-tauri/icons/",
-    "check": "pnpm typecheck && pnpm lint && pnpm test && cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace"
+    "check": "pnpm typecheck && pnpm lint && pnpm test && cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace --no-fail-fast"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

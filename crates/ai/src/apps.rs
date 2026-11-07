@@ -409,10 +409,11 @@ mod tests {
 
     #[test]
     fn finds_the_path_among_shell_startup_noise() {
-        let text = "Welcome back!\n__DAVIS_PATH__/opt/one:/opt/two\n";
+        let path = env::join_paths(["/opt/one", "/opt/two"]).unwrap();
+        let text = format!("Welcome back!\n__DAVIS_PATH__{}\n", path.display());
 
         assert_eq!(
-            parse_shell_path(text),
+            parse_shell_path(&text),
             [PathBuf::from("/opt/one"), PathBuf::from("/opt/two")]
         );
     }

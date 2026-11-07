@@ -464,9 +464,9 @@ pub(crate) mod tests {
         let files =
             data_files_in(&[dropped.to_string_lossy().into_owned(), single.clone()]).unwrap();
 
-        let names: Vec<&str> = files
+        let names: Vec<String> = files
             .iter()
-            .map(|path| path.rsplit('/').next().unwrap())
+            .map(|path| folder_name(Path::new(path)))
             .collect();
         assert_eq!(names, ["a.xlsx", "b.csv", "one.pdf"]);
     }

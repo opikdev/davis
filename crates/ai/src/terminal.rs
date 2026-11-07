@@ -225,6 +225,7 @@ mod tests {
         assert_eq!(terminal_for("windows", script, &[]).unwrap()[0], "cmd");
     }
 
+    #[cfg(unix)]
     #[test]
     fn linux_uses_the_first_terminal_it_finds() {
         let folder = env::temp_dir().join(format!("davis-terminals-{}", std::process::id()));
