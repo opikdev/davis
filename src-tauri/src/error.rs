@@ -3,6 +3,8 @@ use serde::ser::{Serialize, SerializeStruct, Serializer};
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     #[error(transparent)]
+    Agent(#[from] davis_agent::AgentError),
+    #[error(transparent)]
     Ai(#[from] davis_ai::Error),
     #[error(transparent)]
     Engine(#[from] davis_core::Error),
@@ -15,6 +17,7 @@ pub enum AppError {
 impl AppError {
     fn kind(&self) -> &'static str {
         match self {
+            Self::Agent(error) => error.code(),
             Self::Ai(error) => error.code(),
             Self::Engine(error) => error.code(),
             Self::Project(error) => error.code(),

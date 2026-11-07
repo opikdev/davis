@@ -15,9 +15,9 @@ use crate::settings::{ChosenModel, Settings};
 use crate::{Error, Result, secrets};
 
 const APP_TIME_LIMIT: Duration = Duration::from_secs(180);
-const SERVICE_TIME_LIMIT: Duration = Duration::from_secs(180);
-const MAX_OUTPUT_TOKENS: u32 = 16_000;
-const ANTHROPIC_VERSION: &str = "2026-10-21";
+pub(crate) const SERVICE_TIME_LIMIT: Duration = Duration::from_secs(180);
+pub(crate) const MAX_OUTPUT_TOKENS: u32 = 16_000;
+pub(crate) const ANTHROPIC_VERSION: &str = "2026-10-21";
 
 const INSTRUCTIONS: &str = "You turn questions about one table into DuckDB SQL.
 
@@ -426,14 +426,14 @@ fn ask_service(
         .ok_or_else(|| Error::AskFailed(provider.name.clone()))
 }
 
-fn chat_auth(provider: &Provider) -> Option<Auth> {
+pub(crate) fn chat_auth(provider: &Provider) -> Option<Auth> {
     match provider.auth {
         Some(Auth::XGoogApiKey) => Some(Auth::Bearer),
         auth => auth,
     }
 }
 
-fn chat_address(models: &Url, endpoint: &str) -> Result<Url> {
+pub(crate) fn chat_address(models: &Url, endpoint: &str) -> Result<Url> {
     let mut address = models.clone();
     address.set_query(None);
     let path = models.path();

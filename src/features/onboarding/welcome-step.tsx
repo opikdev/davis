@@ -33,7 +33,8 @@ const HIGHLIGHTS: { icon: IconSvgElement; title: string; detail: string }[] = [
   {
     icon: LockIcon,
     title: "Private by default",
-    detail: "Your files stay on this computer. You choose what AI can see.",
+    detail:
+      "Your files stay on this computer. Each answer shows what the AI saw.",
   },
 ]
 

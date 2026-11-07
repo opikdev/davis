@@ -7,18 +7,22 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { AnswerChart } from "@/features/chat/answer-chart"
-import type { TableAnswer } from "@/features/chat/api"
+import { AnswerText } from "@/features/chat/answer-text"
+import type { AgentAnswer, Figure, QueryResult } from "@/features/chat/api"
+import { formatValue } from "@/features/chat/references"
 import { cn } from "@/lib/utils"
 
 const PREVIEW_ROWS = 8
 
-function ResultTable({
+export function ResultTable({
   result,
+  rowLimit = PREVIEW_ROWS,
 }: {
-  result: NonNullable<TableAnswer["result"]>
+  result: QueryResult
+  rowLimit?: number
 }) {
   const { columns, rows, isTruncated } = result
-  const shown = rows.slice(0, PREVIEW_ROWS)
+  const shown = rows.slice(0, rowLimit)
   const total = `${rows.length.toLocaleString()}${isTruncated ? "+" : ""}`
 
   return (
@@ -59,37 +63,61 @@ function ResultTable({
           </TableBody>
         </Table>
       </div>
-      {rows.length > PREVIEW_ROWS && (
+      {rows.length > rowLimit && (
         <p className="text-xs text-subtle">
-          First {PREVIEW_ROWS} of {total} rows
+          First {rowLimit} of {total} rows
         </p>
       )}
     </div>
   )
 }
 
-export function AnswerView({ answer }: { answer: TableAnswer }) {
-  const { title, result } = answer
-  const single =
-    result?.rows.length === 1 && result.columns.length === 1
-      ? result.rows[0][0]
-      : undefined
+function FigureView({
+  figure,
+  result,
+}: {
+  figure: Figure
+  result: QueryResult
+}) {
+  if (figure.view === "number") {
+    const column = result.columns.findIndex(({ name }) => name === figure.y)
+    const value = result.rows[0]?.[Math.max(column, 0)]
+    return (
+      <div className="flex flex-col">
+        <h3 className="text-xs text-muted-foreground">{figure.title}</h3>
+        <p className="text-2xl font-medium tabular-nums select-text">
+          {value ? formatValue(value) : "null"}
+        </p>
+      </div>
+    )
+  }
 
   return (
-    <div className="flex animate-fade flex-col gap-2">
-      <h2 className="font-medium select-text">{title}</h2>
-      {single !== undefined ? (
-        <p className="text-2xl font-medium tabular-nums select-text">
-          {single ?? "null"}
-        </p>
-      ) : (
-        result && (
-          <>
-            <AnswerChart answer={answer} />
-            <ResultTable result={result} />
-          </>
-        )
+    <div className="flex flex-col gap-1.5">
+      <h3 className="text-xs text-muted-foreground">{figure.title}</h3>
+      {figure.view !== "table" && (
+        <AnswerChart figure={figure} result={result} />
       )}
+      <ResultTable result={result} />
+    </div>
+  )
+}
+
+export function AnswerView({ answer }: { answer: AgentAnswer }) {
+  const { title, text, figures, queries } = answer
+
+  return (
+    <div className="flex animate-fade flex-col gap-3">
+      <div className="flex flex-col gap-1">
+        {title && <h2 className="font-medium select-text">{title}</h2>}
+        {text && <AnswerText text={text} queries={queries} />}
+      </div>
+      {figures.map((figure, index) => {
+        const query = queries[figure.query]
+        return query ? (
+          <FigureView key={index} figure={figure} result={query.result} />
+        ) : null
+      })}
     </div>
   )
 }

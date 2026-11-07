@@ -1,5 +1,6 @@
 mod apps;
 mod ask;
+mod bridge;
 mod connection;
 mod error;
 mod install;
@@ -9,6 +10,7 @@ mod providers;
 mod secrets;
 mod settings;
 mod terminal;
+mod tools;
 
 pub use apps::{Account, AppStatus, Detected, detect};
 pub use ask::{
@@ -22,3 +24,6 @@ pub use providers::{Group, Provider, find_provider, providers};
 pub use secrets::{delete_key, load_key};
 pub use settings::{ChosenModel, SavedConnection, Settings};
 pub use terminal::open_sign_in;
+pub use tools::{
+    ModelEvent, ToolDefinition, ToolReply, ToolRun, Toolbox, can_use_tools, run_with_tools,
+};

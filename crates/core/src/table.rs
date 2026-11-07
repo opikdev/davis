@@ -43,7 +43,7 @@ pub struct TableSource {
     pub repair: Repair,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ColumnKind {
     Number,
@@ -53,7 +53,7 @@ pub enum ColumnKind {
     Other,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Column {
     pub name: String,

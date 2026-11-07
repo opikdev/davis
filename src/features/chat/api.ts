@@ -1,36 +1,49 @@
 import { Channel, invoke } from "@tauri-apps/api/core"
 
-import type { Column, Row, TableSource } from "@/features/data"
+import type { Column, Row } from "@/features/data"
 
-export type ChartPlan = {
-  kind: "bar" | "line"
-  x: string
-  y: string
+export type QueryResult = {
+  columns: Column[]
+  rows: Row[]
+  isTruncated: boolean
 }
 
-export type TableAnswer = {
-  title: string
-  sql: string | null
-  chart: ChartPlan | null
-  result: {
-    columns: Column[]
-    rows: Row[]
-    isTruncated: boolean
-  } | null
-}
-
-export type AskTurn = {
-  question: string
+export type StoredQuery = {
   sql: string
+  result: QueryResult
+}
+
+export type Figure = {
+  query: string
+  title: string
+  view: "bar" | "line" | "number" | "table"
+  x: string | null
+  y: string | null
+}
+
+export type AgentAnswer = {
+  title: string
+  text: string
+  figures: Figure[]
+  queries: Record<string, StoredQuery>
+}
+
+export type PastTurn = {
+  question: string
+  answer: string
+  queries: string[]
 }
 
 export type AskStep = {
   id: string
-  kind: "read" | "think" | "write" | "run" | "chart"
+  kind: "read" | "think" | "note" | "write" | "run" | "chart" | "question"
   status: "running" | "done" | "failed" | "stopped"
   label: string
   detail: string | null
   body: string | null
+  query?: string | null
+  sentRows?: number | null
+  options?: string[] | null
 }
 
 export type TimedStep = AskStep & {
@@ -44,7 +57,7 @@ export type Turn = {
   startedAt: number
   finishedAt?: number
   steps: TimedStep[]
-  answer?: TableAnswer
+  answer?: AgentAnswer
   error?: string
   isStopped?: boolean
 }
@@ -57,24 +70,28 @@ export type SavedChat = {
   turns: Turn[]
 }
 
-export function askAboutTable(
+export function askProject(
   turn: number,
-  source: TableSource,
+  project: string,
   request: {
     question: string
-    columns: { name: string; dataType: string }[]
-    history: AskTurn[]
+    activeTable: string | null
+    history: PastTurn[]
   },
   onStep: (step: AskStep) => void
 ) {
   const steps = new Channel<AskStep>()
   steps.onmessage = onStep
-  return invoke<TableAnswer>("ask_about_table", {
+  return invoke<AgentAnswer>("ask_project", {
     turn,
-    source,
+    project,
     request,
     onStep: steps,
   })
+}
+
+export function answerAgent(turn: number, reply: string) {
+  return invoke<boolean>("answer_agent", { turn, reply })
 }
 
 export function stopAsking(turn: number) {

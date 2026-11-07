@@ -2,9 +2,11 @@
 
 Local data workspace built with Rust, Tauri, and React. Your files stay on your computer, and you choose which AI to connect.
 
-Early scaffold: the app runs onboarding, connects to an AI provider, keeps your work in project folders, opens CSV, Parquet, and JSON files in a table, and answers questions about them with charts. Connections and Pages are not built yet.
+Early scaffold: the app runs onboarding, connects to an AI provider, keeps your work in project folders, opens CSV, Parquet, and JSON files in a table, and has an AI analyst that can query every file in a project and explain what it finds with charts. Connections and Pages are not built yet.
 
 A project is a normal folder, in `Documents/Davis` by default. Davis copies your files into its `data` folder and saves each chat in `chats`, so you can move or back up a project like any other folder.
+
+The AI never reads your files directly. It can only ask Davis to run read-only queries over the files in the open project, and it sees at most 50 rows of each result. Each answer shows what it saw. Claude Code and API keys get the full analyst. Codex and OpenCode run with their tools off and answer one query at a time.
 
 ## Run
 

@@ -14,7 +14,7 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from "@/components/ui/chart"
-import type { TableAnswer } from "@/features/chat/api"
+import type { Figure, QueryResult } from "@/features/chat/api"
 
 const LONG_LABEL = 7
 const MANY_BARS = 12
@@ -24,10 +24,9 @@ const compactNumber = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 1,
 })
 
-function chartPoints({ chart, result }: TableAnswer) {
-  if (!chart || !result) return []
-  const xIndex = result.columns.findIndex(({ name }) => name === chart.x)
-  const yIndex = result.columns.findIndex(({ name }) => name === chart.y)
+function chartPoints({ x, y }: Figure, result: QueryResult) {
+  const xIndex = result.columns.findIndex(({ name }) => name === x)
+  const yIndex = result.columns.findIndex(({ name }) => name === y)
   if (xIndex < 0 || yIndex < 0) return []
 
   return result.rows.flatMap((row) => {
@@ -38,17 +37,21 @@ function chartPoints({ chart, result }: TableAnswer) {
   })
 }
 
-export function AnswerChart({ answer }: { answer: TableAnswer }) {
-  const { chart } = answer
-  const points = chartPoints(answer)
-  if (!chart || points.length < 2) return null
+type AnswerChartProps = {
+  figure: Figure
+  result: QueryResult
+}
+
+export function AnswerChart({ figure, result }: AnswerChartProps) {
+  const points = chartPoints(figure, result)
+  if (points.length < 2) return null
 
   const config = {
-    value: { label: chart.y, color: "var(--chart-1)" },
+    value: { label: figure.y ?? "", color: "var(--chart-1)" },
   } satisfies ChartConfig
   const longest = Math.max(...points.map(({ label }) => label.length))
   const liesSideways =
-    chart.kind === "bar" && longest > LONG_LABEL && points.length <= MANY_BARS
+    figure.view === "bar" && longest > LONG_LABEL && points.length <= MANY_BARS
   const height = liesSideways ? Math.max(points.length * 24, 96) : 148
   const axisText = { fontSize: 11, fill: "var(--subtle)" }
 
@@ -58,9 +61,9 @@ export function AnswerChart({ answer }: { answer: TableAnswer }) {
       className="aspect-auto w-full"
       style={{ height }}
       role="img"
-      aria-label={`${chart.y} by ${chart.x}`}
+      aria-label={figure.title}
     >
-      {chart.kind === "line" ? (
+      {figure.view === "line" ? (
         <LineChart data={points} margin={{ top: 6, right: 6, left: -18 }}>
           <CartesianGrid vertical={false} stroke="var(--border)" />
           <XAxis

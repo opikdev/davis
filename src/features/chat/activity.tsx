@@ -3,6 +3,8 @@ import {
   ArrowRight01Icon,
   ChartBarLineIcon,
   CodeIcon,
+  HelpCircleIcon,
+  Note01Icon,
   PlayIcon,
   Table01Icon,
 } from "@hugeicons/core-free-icons"
@@ -14,12 +16,16 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import type { AskStep, TimedStep, Turn } from "@/features/chat/api"
+import { ResultTable } from "@/features/chat/answer-view"
+import type { AskStep, StoredQuery, TimedStep, Turn } from "@/features/chat/api"
+import { withoutReferences } from "@/features/chat/references"
 import { cn } from "@/lib/utils"
 
 const KIND_ICONS: Record<AskStep["kind"], IconSvgElement> = {
   read: Table01Icon,
   think: AiBrain01Icon,
+  note: Note01Icon,
+  question: HelpCircleIcon,
   write: CodeIcon,
   run: PlayIcon,
   chart: ChartBarLineIcon,
@@ -55,12 +61,39 @@ function WorkingBars() {
   )
 }
 
+function NoteRow({ step }: { step: TimedStep }) {
+  return (
+    <p className="py-0.5 pl-5 text-xs/relaxed text-muted-foreground select-text">
+      {withoutReferences(step.body ?? "")}
+    </p>
+  )
+}
+
+function WhatTheAiSaw({ rows, query }: { rows: number; query?: StoredQuery }) {
+  const unit = rows === 1 ? "row" : "rows"
+  return (
+    <div className="mb-1 ml-5 flex flex-col gap-1">
+      <p className="text-xs text-muted-foreground">
+        The AI saw {rows} {unit} of this result
+      </p>
+      {query && <ResultTable result={query.result} rowLimit={rows} />}
+    </div>
+  )
+}
+
 function stepLabel(step: TimedStep) {
   if (step.kind !== "think" || step.status === "running") return step.label
   return `Thought for ${seconds(step.startedAt, step.finishedAt ?? step.startedAt)}`
 }
 
-function StepRow({ step }: { step: TimedStep }) {
+type StepRowProps = {
+  step: TimedStep
+  queries?: Record<string, StoredQuery>
+}
+
+function StepRow({ step, queries }: StepRowProps) {
+  if (step.kind === "note") return <NoteRow step={step} />
+
   const row = (
     <>
       <HugeiconsIcon
@@ -108,6 +141,12 @@ function StepRow({ step }: { step: TimedStep }) {
         <pre className="mt-0.5 mb-1 ml-5 rounded-md border bg-sidebar px-2 py-1.5 font-mono text-[0.6875rem]/relaxed break-words whitespace-pre-wrap text-muted-foreground select-text">
           {step.body}
         </pre>
+        {step.sentRows != null && (
+          <WhatTheAiSaw
+            rows={step.sentRows}
+            query={step.query ? queries?.[step.query] : undefined}
+          />
+        )}
       </CollapsibleContent>
     </Collapsible>
   )
@@ -115,7 +154,13 @@ function StepRow({ step }: { step: TimedStep }) {
 
 function WorkingStatus({ turn }: { turn: Turn }) {
   const now = useNow(true)
-  const current = turn.steps.findLast((step) => step.status === "running")
+  const current = turn.steps.findLast(
+    ({ kind, status }) => status === "running" && kind !== "note"
+  )
+  const label =
+    current?.kind === "question"
+      ? "Waiting for your reply"
+      : (current?.label ?? "Working")
 
   return (
     <div
@@ -123,7 +168,7 @@ function WorkingStatus({ turn }: { turn: Turn }) {
       className="flex h-6 items-center gap-2 text-xs text-muted-foreground"
     >
       <WorkingBars />
-      <span className="truncate">{current?.label ?? "Starting"}</span>
+      <span className="truncate">{label}</span>
       <span className="ml-auto text-subtle tabular-nums">
         {seconds(turn.startedAt, now)}
       </span>
@@ -137,9 +182,13 @@ export function Activity({ turn }: { turn: Turn }) {
   if (isWorking) {
     return (
       <div className="flex animate-fade flex-col">
-        {turn.steps.map((step) => (
-          <StepRow key={step.id} step={step} />
-        ))}
+        {turn.steps
+          .filter(
+            ({ kind, status }) => kind !== "question" || status !== "running"
+          )
+          .map((step) => (
+            <StepRow key={step.id} step={step} />
+          ))}
         <WorkingStatus turn={turn} />
       </div>
     )
@@ -160,7 +209,7 @@ export function Activity({ turn }: { turn: Turn }) {
       <CollapsibleContent>
         <div className="mt-0.5 flex flex-col border-l pl-2">
           {turn.steps.map((step) => (
-            <StepRow key={step.id} step={step} />
+            <StepRow key={step.id} step={step} queries={turn.answer?.queries} />
           ))}
         </div>
       </CollapsibleContent>

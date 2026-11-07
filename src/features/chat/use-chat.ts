@@ -1,16 +1,79 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import {
-  askAboutTable,
+  answerAgent,
+  askProject,
   readChat,
   saveChat,
   stopAsking,
+  type AgentAnswer,
   type AskStep,
+  type PastTurn,
   type TimedStep,
   type Turn,
 } from "@/features/chat/api"
+import { fillReferences } from "@/features/chat/references"
 import type { OpenedTable } from "@/features/data"
 import { errorKind, toErrorMessage } from "@/lib/ipc-error"
+
+const SAVE_INTERVAL_MS = 1000
+const INTERRUPTED = "Davis closed before this finished."
+
+function pastTurn({ question, answer }: Turn): PastTurn[] {
+  if (!answer) return []
+  const text = fillReferences(answer.text, answer.queries)
+  return [
+    {
+      question,
+      answer: [answer.title, text].filter(Boolean).join("\n"),
+      queries: Object.values(answer.queries).map(({ sql }) => sql),
+    },
+  ]
+}
+
+type EarlierAnswer = {
+  title: string
+  sql: string | null
+  chart: { kind: "bar" | "line"; x: string; y: string } | null
+  result: AgentAnswer["queries"][string]["result"] | null
+}
+
+// Chats saved before answers could hold several results.
+function currentAnswer(answer: AgentAnswer | EarlierAnswer): AgentAnswer {
+  if ("figures" in answer) return answer
+  const { title, sql, chart, result } = answer
+  if (!result) return { title, text: "", figures: [], queries: {} }
+  const isOneValue = result.rows.length === 1 && result.columns.length === 1
+  return {
+    title,
+    text: "",
+    figures: [
+      {
+        query: "q1",
+        title,
+        view: chart?.kind ?? (isOneValue ? "number" : "table"),
+        x: chart?.x ?? null,
+        y: chart?.y ?? null,
+      },
+    ],
+    queries: { q1: { sql: sql ?? "", result } },
+  }
+}
+
+function restoredTurn(turn: Turn): Turn {
+  const answer = turn.answer && currentAnswer(turn.answer)
+  if (turn.finishedAt) return { ...turn, answer }
+  return {
+    ...turn,
+    answer,
+    finishedAt: Date.now(),
+    error: INTERRUPTED,
+    steps: turn.steps.flatMap((step) => {
+      if (step.status !== "running") return [step]
+      return step.kind === "note" ? [] : [{ ...step, status: "stopped" }]
+    }),
+  }
+}
 
 function mergeStep(steps: TimedStep[], step: AskStep, now: number) {
   const known = steps.find(({ id }) => id === step.id)
@@ -57,19 +120,23 @@ export function useChat(
   const [chatId, setChatId] = useState<string>()
   const [saveError, setSaveError] = useState<string>()
   const savedTurns = useRef(turns)
+  const lastSave = useRef(0)
   const nextId = useRef(1)
   const activeId = turns.find((turn) => !turn.finishedAt)?.id
   const isAsking = activeId !== undefined
 
   useEffect(() => {
-    if (!project || !chatId || isAsking) return
+    if (!project || !chatId) return
     if (turns.length === 0 || turns === savedTurns.current) return
+    const now = Date.now()
+    if (isAsking && now - lastSave.current < SAVE_INTERVAL_MS) return
+    lastSave.current = now
     savedTurns.current = turns
     const [first] = turns
     saveChat(project, {
       id: chatId,
-      title: first.answer?.title ?? first.question,
-      updatedAt: Date.now(),
+      title: first.answer?.title || first.question,
+      updatedAt: now,
       table: table?.name ?? null,
       turns,
     })
@@ -104,29 +171,28 @@ export function useChat(
 
   const run = useCallback(
     async (id: number, question: string) => {
-      if (!table) return
+      if (!project) return
       const history = turns.flatMap((turn) =>
-        turn.id !== id && turn.answer?.sql
-          ? [{ question: turn.question, sql: turn.answer.sql }]
-          : []
+        turn.id === id ? [] : pastTurn(turn)
       )
       try {
-        const answer = await askAboutTable(
+        const answer = await askProject(
           id,
-          table.source,
-          {
-            question,
-            columns: table.columns.map(({ name, dataType }) => ({
-              name,
-              dataType,
-            })),
-            history,
-          },
+          project,
+          { question, activeTable: table?.name ?? null, history },
           (step) => buffer.add(id, step)
         )
         buffer.flush()
         update(id, (turn) =>
-          turn.isStopped ? {} : { answer, finishedAt: Date.now() }
+          turn.isStopped
+            ? {}
+            : {
+                answer,
+                finishedAt: Date.now(),
+                steps: turn.steps.filter(
+                  ({ kind, status }) => kind !== "note" || status !== "running"
+                ),
+              }
         )
       } catch (failure) {
         buffer.flush()
@@ -140,7 +206,7 @@ export function useChat(
         }))
       }
     },
-    [buffer, table, turns, update]
+    [buffer, project, table?.name, turns, update]
   )
 
   const ask = useCallback(
@@ -171,6 +237,16 @@ export function useChat(
     [run, update]
   )
 
+  const reply = useCallback(
+    (text: string) => {
+      if (activeId === undefined) return
+      answerAgent(activeId, text).catch((failure: unknown) =>
+        setSaveError(toErrorMessage(failure))
+      )
+    },
+    [activeId]
+  )
+
   const stop = useCallback(() => {
     if (activeId === undefined) return
     update(activeId, () => ({ isStopped: true, finishedAt: Date.now() }))
@@ -188,9 +264,10 @@ export function useChat(
 
   const open = useCallback(async (projectPath: string, id: string) => {
     const chat = await readChat(projectPath, id)
-    savedTurns.current = chat.turns
-    nextId.current = Math.max(0, ...chat.turns.map((turn) => turn.id)) + 1
-    setTurns(chat.turns)
+    const restored = chat.turns.map(restoredTurn)
+    savedTurns.current = restored
+    nextId.current = Math.max(0, ...restored.map((turn) => turn.id)) + 1
+    setTurns(restored)
     setChatId(id)
     setSaveError(undefined)
     return chat
@@ -203,6 +280,7 @@ export function useChat(
     isAsking,
     ask,
     retry,
+    reply,
     stop,
     clear,
     open,

@@ -99,10 +99,15 @@ type ChatPanelProps = {
 }
 
 export function ChatPanel({ table, chat }: ChatPanelProps) {
-  const { turns, saveError, isAsking, ask, retry, stop, clear } = chat
+  const { turns, saveError, isAsking, ask, retry, reply, stop, clear } = chat
   const [question, setQuestion] = useState("")
   const conversation = useRef<HTMLDivElement>(null)
-  const canSend = question.trim().length > 0 && !isAsking
+  const asked = turns
+    .at(-1)
+    ?.steps.find(
+      ({ kind, status }) => kind === "question" && status === "running"
+    )
+  const canSend = question.trim().length > 0 && (!isAsking || Boolean(asked))
 
   useEffect(() => {
     const box = conversation.current
@@ -111,7 +116,8 @@ export function ChatPanel({ table, chat }: ChatPanelProps) {
 
   function send() {
     if (!canSend) return
-    ask(question.trim())
+    if (asked) reply(question.trim())
+    else ask(question.trim())
     setQuestion("")
   }
 
@@ -152,10 +158,29 @@ export function ChatPanel({ table, chat }: ChatPanelProps) {
         )}
       </div>
       <div className="shrink-0 p-2 pt-0">
+        {asked && (
+          <div className="mb-1.5 flex animate-fade flex-col gap-1.5 rounded-xl border bg-sidebar p-2.5">
+            <p className="select-text">{asked.label}</p>
+            {asked.options && asked.options.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {asked.options.map((option) => (
+                  <Button
+                    key={option}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => reply(option)}
+                  >
+                    {option}
+                  </Button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <InputGroup className="rounded-xl border-border bg-sidebar transition-colors has-[[data-slot=input-group-control]:focus-visible]:border-input has-[[data-slot=input-group-control]:focus-visible]:ring-0">
           <InputGroupTextarea
             aria-label="Ask about this data"
-            placeholder="Ask about this data"
+            placeholder={asked ? "Type your reply" : "Ask about this data"}
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
             onKeyDown={(event) => {
@@ -173,7 +198,7 @@ export function ChatPanel({ table, chat }: ChatPanelProps) {
               side="top"
               className="min-w-0 text-muted-foreground"
             />
-            {isAsking ? (
+            {isAsking && (!asked || !question.trim()) ? (
               <InputGroupButton
                 variant="secondary"
                 size="icon-sm"

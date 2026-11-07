@@ -96,6 +96,7 @@ type Backend = {
   rows?: (args: unknown) => unknown
   ask?: (args: unknown) => unknown
   onStop?: (turn: unknown) => void
+  onReply?: (reply: unknown) => void
   project?: ProjectFixture
   saved?: SavedChatFixture[]
   onSaveChat?: (chat: unknown) => void
@@ -131,6 +132,7 @@ function renderWorkspace({
   rows,
   ask,
   onStop,
+  onReply,
   project: existing,
   saved = [],
   onSaveChat,
@@ -188,7 +190,8 @@ function renderWorkspace({
     if (command === "choose_model") onChoose?.(payload.choice)
     if (command === "open_table") return openTable?.()
     if (command === "read_rows") return rows?.(payload)
-    if (command === "ask_about_table") return ask?.(payload)
+    if (command === "ask_project") return ask?.(payload)
+    if (command === "answer_agent") return onReply?.(payload.reply) ?? true
     if (command === "stop_asking") onStop?.(payload.turn)
     return undefined
   })
@@ -385,21 +388,27 @@ test("the keyboard reaches the end of a huge table", async () => {
   expect(await screen.findByText("row 999999")).toBeTruthy()
 })
 
+const SALES_SQL = "SELECT region, sum(amount) AS total FROM sales GROUP BY 1"
+
+const SALES_RESULT = {
+  columns: [
+    { name: "region", dataType: "VARCHAR", kind: "text" },
+    { name: "total", dataType: "BIGINT", kind: "number" },
+  ],
+  rows: [
+    ["EMEA", "1500"],
+    ["APAC", "900"],
+  ],
+  isTruncated: false,
+}
+
 const SALES_ANSWER = {
   title: "Sales by region",
-  sql: "SELECT region, sum(amount) AS total FROM data GROUP BY 1",
-  chart: { kind: "bar", x: "region", y: "total" },
-  result: {
-    columns: [
-      { name: "region", dataType: "VARCHAR", kind: "text" },
-      { name: "total", dataType: "BIGINT", kind: "number" },
-    ],
-    rows: [
-      ["EMEA", "1500"],
-      ["APAC", "900"],
-    ],
-    isTruncated: false,
-  },
+  text: "EMEA leads with {{q1.0.total}}.",
+  figures: [
+    { query: "q1", title: "Totals", view: "bar", x: "region", y: "total" },
+  ],
+  queries: { q1: { sql: SALES_SQL, result: SALES_RESULT } },
 }
 
 async function renderOpenTable(
@@ -464,7 +473,7 @@ test("the work is shown as it happens, then folds away", async () => {
           status: "done",
           label: "Writing query",
           detail: null,
-          body: SALES_ANSWER.sql,
+          body: SALES_SQL,
         })
         resolve(SALES_ANSWER)
       }, 80)
@@ -481,7 +490,7 @@ test("the work is shown as it happens, then folds away", async () => {
   expect(screen.queryByText("Read columns")).toBeNull()
 
   await userEvent.click(screen.getByRole("button", { name: /Worked for/ }))
-  expect(await screen.findByText(SALES_ANSWER.sql)).toBeTruthy()
+  expect(await screen.findByText(SALES_SQL)).toBeTruthy()
 })
 
 test("Stop ends the question and tells the app", async () => {
@@ -745,7 +754,7 @@ test("New chat starts over", async () => {
   expect(screen.queryByRole("heading", { name: "Sales by region" })).toBeNull()
 })
 
-test("only the question, column names, and earlier queries are sent", async () => {
+test("a follow-up carries the earlier answer and its queries", async () => {
   const ask = vi.fn<(args: unknown) => unknown>(() => SALES_ANSWER)
   await renderOpenTable(ask)
 
@@ -755,43 +764,283 @@ test("only the question, column names, and earlier queries are sent", async () =
   await waitFor(() => expect(ask).toHaveBeenCalledTimes(2))
 
   expect(ask.mock.calls[1][0]).toMatchObject({
-    source: SALES_TABLE.source,
+    project: "/docs/sales",
     request: {
       question: "Second?",
-      columns: [
-        { name: "region", dataType: "VARCHAR" },
-        { name: "amount", dataType: "BIGINT" },
+      activeTable: "sales.csv",
+      history: [
+        {
+          question: "First?",
+          answer: `Sales by region\nEMEA leads with ${(1500).toLocaleString()}.`,
+          queries: [SALES_SQL],
+        },
       ],
-      history: [{ question: "First?", sql: SALES_ANSWER.sql }],
     },
   })
-  expect(JSON.stringify(ask.mock.calls[1][0])).not.toContain("1200")
+})
+
+test("a number in an answer shows the query it came from", async () => {
+  await renderOpenTable(() => SALES_ANSWER)
+
+  await askQuestion("Sales?")
+  const figure = (1500).toLocaleString()
+  const number = await screen.findByRole("button", {
+    name: `${figure}, show where this comes from`,
+  })
+  await userEvent.click(number)
+
+  expect(
+    await screen.findByText("From total, row 1 of this query")
+  ).toBeTruthy()
+  expect(screen.getAllByText(SALES_SQL).length).toBeGreaterThan(0)
+})
+
+test("a number the AI points at wrongly is never made up", async () => {
+  await renderOpenTable(() => ({
+    ...SALES_ANSWER,
+    text: "It was {{q1.9.total}} and {{q7.0.total}}.",
+  }))
+
+  await askQuestion("Sales?")
+
+  expect(await screen.findAllByText("missing value")).toHaveLength(2)
+})
+
+test("an answer can hold several figures", async () => {
+  await renderOpenTable(() => ({
+    ...SALES_ANSWER,
+    figures: [
+      { query: "q1", title: "By region", view: "bar", x: "region", y: "total" },
+      { query: "q1", title: "All rows", view: "table", x: null, y: null },
+    ],
+  }))
+
+  await askQuestion("Sales?")
+
+  expect(await screen.findByRole("heading", { name: "By region" })).toBeTruthy()
+  expect(screen.getByRole("heading", { name: "All rows" })).toBeTruthy()
+})
+
+test("the final text is not repeated as a working note", async () => {
+  await renderOpenTable((args) => {
+    const { onStep } = args as { onStep: { onmessage: (s: unknown) => void } }
+    onStep.onmessage({
+      id: "note-1",
+      kind: "note",
+      status: "done",
+      label: "Note",
+      detail: null,
+      body: "Checking the regions first.",
+    })
+    onStep.onmessage({
+      id: "note-2",
+      kind: "note",
+      status: "running",
+      label: "Note",
+      detail: null,
+      body: "Sales by region\nEMEA leads with {{q1.0.total}}.",
+    })
+    return SALES_ANSWER
+  })
+
+  await askQuestion("Sales?")
+  await screen.findByRole("heading", { name: "Sales by region" })
+  await userEvent.click(screen.getByRole("button", { name: /Worked for/ }))
+
+  expect(await screen.findByText("Checking the regions first.")).toBeTruthy()
+  expect(screen.queryByText(/leads with …/)).toBeNull()
+})
+
+test("a query step shows exactly what the AI saw", async () => {
+  await renderOpenTable((args) => {
+    const { onStep } = args as { onStep: { onmessage: (s: unknown) => void } }
+    onStep.onmessage({
+      id: "run-q1",
+      kind: "run",
+      status: "done",
+      label: "Compare regions",
+      detail: "2 rows in 4 ms",
+      body: SALES_SQL,
+      query: "q1",
+      sentRows: 1,
+    })
+    return SALES_ANSWER
+  })
+
+  await askQuestion("Sales?")
+  await screen.findByRole("heading", { name: "Sales by region" })
+  await userEvent.click(screen.getByRole("button", { name: /Worked for/ }))
+  await userEvent.click(
+    await screen.findByRole("button", { name: /Compare regions/ })
+  )
+
+  expect(
+    await screen.findByText("The AI saw 1 row of this result")
+  ).toBeTruthy()
+})
+
+function askAndWait(args: unknown) {
+  const { onStep } = args as { onStep: { onmessage: (s: unknown) => void } }
+  onStep.onmessage({
+    id: "ask-1",
+    kind: "question",
+    status: "running",
+    label: "Which year?",
+    detail: null,
+    body: null,
+    options: ["2025", "2026"],
+  })
+  return new Promise(() => {})
+}
+
+test("a question from the AI can be answered with one click", async () => {
+  const onReply = vi.fn()
+  await renderOpenTable(askAndWait, undefined, { onReply })
+
+  await askQuestion("Sales?")
+  expect(await screen.findByText("Which year?")).toBeTruthy()
+  await userEvent.click(screen.getByRole("button", { name: "2026" }))
+
+  expect(onReply).toHaveBeenCalledWith("2026")
+})
+
+test("a question from the AI can be answered by typing", async () => {
+  const onReply = vi.fn()
+  const ask = vi.fn(askAndWait)
+  await renderOpenTable(ask, undefined, { onReply })
+
+  await askQuestion("Sales?")
+  await screen.findByText("Which year?")
+  await askQuestion("Both years")
+
+  await waitFor(() => expect(onReply).toHaveBeenCalledWith("Both years"))
+  expect(ask).toHaveBeenCalledTimes(1)
+})
+
+test("Stop still works while the AI waits for a reply", async () => {
+  const onStop = vi.fn()
+  await renderOpenTable(askAndWait, onStop)
+
+  await askQuestion("Sales?")
+  await screen.findByText("Which year?")
+  await userEvent.click(screen.getByRole("button", { name: "Stop" }))
+
+  expect(onStop).toHaveBeenCalledWith(1)
+})
+
+test("a chat saved mid-answer reopens as interrupted and can be retried", async () => {
+  const interrupted = {
+    ...SAVED_CHAT,
+    turns: [
+      {
+        id: 1,
+        question: "Why?",
+        startedAt: 1,
+        steps: [
+          {
+            id: "run-q1",
+            kind: "run",
+            status: "running",
+            label: "Compare regions",
+            detail: null,
+            body: "SELECT 1",
+            startedAt: 1,
+          },
+        ],
+      },
+    ],
+  }
+  renderWorkspace(projectBackend({ saved: [interrupted] }))
+
+  expect(
+    await screen.findByText("Davis closed before this finished.")
+  ).toBeTruthy()
+  expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy()
+  expect(await screen.findByRole("button", { name: "Send" })).toBeTruthy()
+})
+
+test("a chat saved in the earlier format still opens", async () => {
+  const earlier = {
+    ...SAVED_CHAT,
+    turns: [
+      {
+        id: 1,
+        question: "Sales?",
+        startedAt: 1,
+        finishedAt: 2,
+        steps: [],
+        answer: {
+          title: "Earlier answer",
+          sql: SALES_SQL,
+          chart: { kind: "bar", x: "region", y: "total" },
+          result: SALES_RESULT,
+        },
+      },
+    ],
+  }
+  renderWorkspace(projectBackend({ saved: [earlier] }))
+
+  expect(
+    await screen.findByRole("heading", { name: "Earlier answer", level: 2 })
+  ).toBeTruthy()
+  expect(screen.getByRole("cell", { name: "1500" })).toBeTruthy()
 })
 
 test("one number is shown as the answer itself", async () => {
   await renderOpenTable(() => ({
     title: "Row count",
-    sql: "SELECT count(*) AS n FROM data",
-    chart: null,
-    result: {
-      columns: [{ name: "n", dataType: "BIGINT", kind: "number" }],
-      rows: [["2964624"]],
-      isTruncated: false,
+    text: "",
+    figures: [{ query: "q1", title: "Rows", view: "number", x: null, y: null }],
+    queries: {
+      q1: {
+        sql: "SELECT count(*) AS n FROM sales",
+        result: {
+          columns: [{ name: "n", dataType: "BIGINT", kind: "number" }],
+          rows: [["2964624"]],
+          isTruncated: false,
+        },
+      },
     },
   }))
 
   await askQuestion("How many?")
 
-  expect(await screen.findByText("2964624")).toBeTruthy()
-  expect(screen.queryByRole("table", { name: "Result" })).toBeNull()
+  expect(await screen.findByText((2964624).toLocaleString())).toBeTruthy()
+  const chat = screen.getByRole("complementary", { name: "Ask AI" })
+  expect(within(chat).queryByRole("table")).toBeNull()
+})
+
+test("an answer with no title shows just its text", async () => {
+  const onSaveChat = vi.fn()
+  await renderOpenTable(
+    () => ({
+      title: "",
+      text: "I can't read that file.",
+      figures: [],
+      queries: {},
+    }),
+    undefined,
+    { onSaveChat }
+  )
+
+  await askQuestion("Read my file")
+
+  expect(await screen.findByText("I can't read that file.")).toBeTruthy()
+  const chat = screen.getByRole("complementary", { name: "Ask AI" })
+  expect(within(chat).getAllByRole("heading")).toHaveLength(1)
+  await waitFor(() =>
+    expect(onSaveChat.mock.lastCall?.[0]).toMatchObject({
+      title: "Read my file",
+    })
+  )
 })
 
 test("an answer with no query still explains itself", async () => {
   await renderOpenTable(() => ({
     title: "This file has no date column",
-    sql: null,
-    chart: null,
-    result: null,
+    text: "",
+    figures: [],
+    queries: {},
   }))
 
   await askQuestion("Sales by month?")

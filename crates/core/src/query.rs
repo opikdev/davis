@@ -4,7 +4,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use duckdb::{Connection, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::table::{Column, Row, TableSource, connect, kind_of, quoted, scan};
@@ -14,7 +14,13 @@ const MAX_RESULT_ROWS: usize = 1_000;
 const QUERY_TIME_LIMIT: Duration = Duration::from_secs(60);
 const STOP_CHECK: Duration = Duration::from_millis(50);
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryTable {
+    pub name: String,
+    pub source: TableSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryResult {
     pub columns: Vec<Column>,
@@ -22,17 +28,43 @@ pub struct QueryResult {
     pub is_truncated: bool,
 }
 
-pub fn run_query(source: &TableSource, sql: &str, stop: Arc<AtomicBool>) -> Result<QueryResult> {
-    run_query_within(source, sql, QUERY_TIME_LIMIT, stop)
+// File names can hold anything, so each becomes a plain name SQL can use unquoted.
+pub fn table_name(file_name: &str, taken: &[String]) -> String {
+    let stem = file_name.split('.').next().unwrap_or(file_name);
+    let mut plain: String = stem
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    plain = plain.trim_matches('_').to_owned();
+    if !plain.starts_with(|character: char| character.is_ascii_alphabetic()) {
+        plain = format!("t_{plain}");
+    }
+    (1..)
+        .map(|number| match number {
+            1 => plain.clone(),
+            _ => format!("{plain}_{number}"),
+        })
+        .find(|name| !taken.contains(name))
+        .expect("an unused number always exists")
+}
+
+pub fn run_query(tables: &[QueryTable], sql: &str, stop: Arc<AtomicBool>) -> Result<QueryResult> {
+    run_query_within(tables, sql, QUERY_TIME_LIMIT, stop)
 }
 
 fn run_query_within(
-    source: &TableSource,
+    tables: &[QueryTable],
     sql: &str,
     limit: Duration,
     stop: Arc<AtomicBool>,
 ) -> Result<QueryResult> {
-    let connection = locked_connection(source)?;
+    let connection = locked_connection(tables)?;
     let sql = sql.trim().trim_end_matches(';').trim();
     require_one_select(&connection, sql)?;
 
@@ -59,17 +91,29 @@ fn run_query_within(
     })
 }
 
-// The view is created before lockdown because lockdown can't be undone. The file
-// stays writable through `allowed_paths`, so `require_one_select` is what protects it.
-fn locked_connection(source: &TableSource) -> Result<Connection> {
+// The views are created before lockdown because lockdown can't be undone. The files
+// stay writable through `allowed_paths`, so `require_one_select` is what protects them.
+fn locked_connection(tables: &[QueryTable]) -> Result<Connection> {
     let connection = connect()?;
+    let views: String = tables
+        .iter()
+        .map(|table| {
+            format!(
+                "CREATE VIEW \"{}\" AS SELECT * FROM {};\n",
+                table.name.replace('"', "\"\""),
+                scan(&table.source, false)
+            )
+        })
+        .collect();
+    let paths = tables
+        .iter()
+        .map(|table| quoted(&table.source.path))
+        .collect::<Vec<_>>()
+        .join(", ");
     connection.execute_batch(&format!(
-        "CREATE VIEW data AS SELECT * FROM {};
-         SET allowed_paths = [{}];
+        "{views}SET allowed_paths = [{paths}];
          SET enable_external_access = false;
-         SET lock_configuration = true;",
-        scan(source, false),
-        quoted(&source.path),
+         SET lock_configuration = true;"
     ))?;
     Ok(connection)
 }
@@ -193,8 +237,23 @@ mod tests {
         (path, source)
     }
 
+    fn data_table(source: &TableSource) -> Vec<QueryTable> {
+        vec![QueryTable {
+            name: "data".to_owned(),
+            source: source.clone(),
+        }]
+    }
+
     fn ask(source: &TableSource, sql: &str) -> Result<QueryResult> {
-        run_query(source, sql, Arc::new(AtomicBool::new(false)))
+        run_query(&data_table(source), sql, Arc::new(AtomicBool::new(false)))
+    }
+
+    fn table(folder: &Folder, name: &str, content: &str) -> QueryTable {
+        let path = folder.write(&format!("{name}.csv"), content);
+        QueryTable {
+            name: name.to_owned(),
+            source: open_table(&path).unwrap().source,
+        }
     }
 
     fn code(source: &TableSource, sql: &str) -> &'static str {
@@ -342,6 +401,75 @@ mod tests {
     }
 
     #[test]
+    fn tables_can_be_joined() {
+        let folder = Folder::new("join");
+        let tables = [
+            table(&folder, "orders", "customer,amount\n1,10\n1,5\n2,20\n"),
+            table(&folder, "customers", "id,name\n1,Ada\n2,Linus\n"),
+        ];
+
+        let result = run_query(
+            &tables,
+            "SELECT name, sum(amount) AS total FROM orders JOIN customers ON customer = id
+             GROUP BY name ORDER BY total DESC",
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.rows,
+            [
+                [Some("Linus".to_owned()), Some("20".to_owned())],
+                [Some("Ada".to_owned()), Some("15".to_owned())]
+            ]
+        );
+    }
+
+    #[test]
+    fn a_query_reaches_only_the_files_it_was_given() {
+        let folder = Folder::new("reach");
+        let tables = [table(&folder, "orders", "amount\n1\n")];
+        let private = folder.write("private.csv", "secret\nCANARY\n");
+
+        let error = run_query(
+            &tables,
+            &format!("SELECT * FROM read_csv('{private}')"),
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap_err();
+
+        assert!(!error.to_string().contains("CANARY"));
+        assert_ne!(error.code(), "stopped");
+    }
+
+    #[test]
+    fn nothing_can_change_any_of_the_files() {
+        let folder = Folder::new("many");
+        let first = table(&folder, "first", "a\n1\n");
+        let second = table(&folder, "second", "a\n2\n");
+        let target = second.source.path.clone();
+        let attack = format!(
+            "SELECT 1); COPY (SELECT 9) TO '{target}' (HEADER false, USE_TMP_FILE false); SELECT * FROM (SELECT 1"
+        );
+
+        let result = run_query(&[first, second], &attack, Arc::new(AtomicBool::new(false)));
+
+        assert!(result.is_err());
+        assert_eq!(fs::read_to_string(&target).unwrap(), "a\n2\n");
+    }
+
+    #[test]
+    fn file_names_become_plain_table_names() {
+        let taken = vec!["sales".to_owned()];
+
+        assert_eq!(table_name("Q3 Sales (final).csv", &[]), "q3_sales__final");
+        assert_eq!(table_name("2026-orders.parquet", &[]), "t_2026_orders");
+        assert_eq!(table_name("sales.csv.gz", &taken), "sales_2");
+        assert_eq!(table_name("données.csv", &[]), "donn_es");
+        assert_eq!(table_name("___.csv", &[]), "t_");
+    }
+
+    #[test]
     fn a_running_query_can_be_stopped() {
         let folder = Folder::new("stop");
         let (_, source) = sales(&folder);
@@ -353,7 +481,7 @@ mod tests {
         });
 
         let error = run_query(
-            &source,
+            &data_table(&source),
             "SELECT count(*) FROM range(10000000000) a, range(1000) b WHERE a.range % 7 = b.range",
             stop,
         )
@@ -368,7 +496,7 @@ mod tests {
         let (_, source) = sales(&folder);
 
         let error = run_query_within(
-            &source,
+            &data_table(&source),
             "SELECT count(*) FROM range(10000000000) a, range(1000) b WHERE a.range % 7 = b.range",
             Duration::from_millis(50),
             Arc::new(AtomicBool::new(false)),
