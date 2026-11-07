@@ -11,3 +11,7 @@ publish = false
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+
+# Dependency debug info is most of the build size, and DuckDB alone adds 1.5 GB per copy.
+[profile.dev.package."*"]
+debug = false
