@@ -14,6 +14,8 @@ pub enum Error {
     EmptyWorkbook(String),
     #[error("Choose a {0} file to replace {1}.")]
     WrongFileKind(String, String),
+    #[error("Davis couldn't use the system keychain: {0}")]
+    Keychain(String),
     #[error("Davis couldn't update the project folder: {0}")]
     Storage(#[from] std::io::Error),
     #[error("Davis couldn't save that: {0}")]
@@ -30,6 +32,7 @@ impl Error {
             Self::UnreadableWorkbook(_) => "unreadable-workbook",
             Self::EmptyWorkbook(_) => "empty-workbook",
             Self::WrongFileKind(..) => "wrong-file-kind",
+            Self::Keychain(_) => "keychain",
             Self::Storage(_) => "project-storage",
             Self::Encoding(_) => "project-encoding",
         }

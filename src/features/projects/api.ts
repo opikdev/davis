@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
 
+import type { DatabaseConnection } from "@/features/connections"
 import type { OpenedTable } from "@/features/data"
 
 export type ProjectFile = {
@@ -24,6 +25,7 @@ export type Project = {
   path: string
   name: string
   files: ProjectFile[]
+  connections: DatabaseConnection[]
   chats: ChatSummary[]
   pages: PageSummary[]
 }

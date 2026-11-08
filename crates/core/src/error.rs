@@ -20,6 +20,14 @@ pub enum Error {
     StoppedQuery,
     #[error("Davis couldn't finish that query. A value may not match its column type.")]
     FailedQuery,
+    #[error("Postgres support isn't downloaded yet.")]
+    MissingDatabaseSupport,
+    #[error("Davis couldn't download Postgres support. Check that you're online and try again.")]
+    DatabaseSupportDownload,
+    #[error("Couldn't connect to the database. {0}")]
+    UnreachableDatabase(String),
+    #[error("This database needs its password again. Reconnect it to keep using its tables.")]
+    DisconnectedDatabase,
 }
 
 impl Error {
@@ -35,6 +43,10 @@ impl Error {
             Self::SlowQuery => "slow-query",
             Self::StoppedQuery => "stopped",
             Self::FailedQuery => "failed-query",
+            Self::MissingDatabaseSupport => "missing-database-support",
+            Self::DatabaseSupportDownload => "database-support-download",
+            Self::UnreachableDatabase(_) => "unreachable-database",
+            Self::DisconnectedDatabase => "disconnected-database",
         }
     }
 }

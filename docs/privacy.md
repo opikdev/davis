@@ -5,9 +5,10 @@ Davis has no account, analytics, crash reports, or update checks. It never sends
 ## What stays on your computer
 
 - Your files. Davis copies each file you add into the project folder, which is in `Documents/Davis` by default.
+- Database connections, which are saved in the project folder without their passwords.
 - Your chats and Pages, which are saved in the same project folder.
 - Your settings, in the Davis settings folder listed under [Remove everything](#remove-everything).
-- API keys, in your system's keychain: Keychain on macOS, Credential Manager on Windows, and a Secret Service keyring on Linux.
+- API keys and database passwords, in your system's keychain: Keychain on macOS, Credential Manager on Windows, and a Secret Service keyring on Linux.
 
 ## What goes to the AI you choose
 
@@ -30,9 +31,14 @@ Where that goes depends on what you connect:
 
 That provider's own privacy policy covers what it does with them.
 
+## Databases you connect
+
+When you connect a Postgres database, Davis reads it directly from your computer each time a chart or answer needs it. It only reads, and nothing is copied into the project. Rows from the database reach the AI the same way rows from files do: only as the capped results of queries it asks for.
+
 ## Other connections
 
 - When you add an API key, Davis asks the provider for its list of models, so it can check the key.
+- The first time you connect a database, and only if you agree, Davis downloads Postgres support from DuckDB (`extensions.duckdb.org`).
 - When you click **Install** for Claude Code, Codex, or OpenCode, Davis runs that tool's official install command, which downloads it from its maker.
 
 ## Remove everything
@@ -44,7 +50,7 @@ Uninstalling Davis removes the app. To also remove your data, delete:
   - macOS: `~/Library/Application Support/dev.opik.davis`
   - Windows: `%APPDATA%\dev.opik.davis` and `%LOCALAPPDATA%\dev.opik.davis`
   - Linux: `~/.config/dev.opik.davis` and `~/.local/share/dev.opik.davis`
-- any API keys, which you can also remove from inside Davis by disconnecting the provider. In your keychain, they're saved under `dev.opik.davis`.
+- any API keys and database passwords, which you can also remove from inside Davis by disconnecting the provider or removing the database's tables. In your keychain, they're saved under `dev.opik.davis`.
 
 ## Questions
 

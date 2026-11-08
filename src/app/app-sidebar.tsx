@@ -2,6 +2,7 @@ import {
   Add01Icon,
   Cancel01Icon,
   DashboardSquare01Icon,
+  Database01Icon,
   File02Icon,
   Home01Icon,
   Message01Icon,
@@ -13,6 +14,12 @@ import { useState } from "react"
 
 import { DavisMark } from "@/components/davis-mark"
 import { SoundToggle } from "@/components/sound-toggle"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Sidebar,
   SidebarContent,
@@ -27,6 +34,11 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
+import {
+  tableLabel,
+  type ConnectedTable,
+  type DatabaseConnection,
+} from "@/features/connections"
 import {
   ConfirmRemoval,
   ProjectSwitcher,
@@ -52,6 +64,7 @@ type Removal =
   | { kind: "file"; file: ProjectFile }
   | { kind: "chat"; chat: ChatSummary }
   | { kind: "page"; page: PageSummary }
+  | { kind: "table"; connection: DatabaseConnection; table: ConnectedTable }
 
 type AppSidebarProps = Pick<
   React.ComponentProps<typeof ProjectSwitcher>,
@@ -66,7 +79,16 @@ type AppSidebarProps = Pick<
   onDeletePage: (page: PageSummary) => void
   onViewChange: (view: View) => void
   onAddFiles: () => void
+  onConnectDatabase: () => void
   onOpenFile: (file: ProjectFile) => void
+  onOpenDatabaseTable: (
+    connection: DatabaseConnection,
+    table: ConnectedTable
+  ) => void
+  onRemoveDatabaseTable: (
+    connection: DatabaseConnection,
+    table: ConnectedTable
+  ) => void
   onReplaceFile: (file: ProjectFile) => void
   onRemoveFile: (file: ProjectFile) => void
   onNewChat: () => void
@@ -90,7 +112,10 @@ export function AppSidebar({
   onDeletePage,
   onViewChange,
   onAddFiles,
+  onConnectDatabase,
   onOpenFile,
+  onOpenDatabaseTable,
+  onRemoveDatabaseTable,
   onReplaceFile,
   onRemoveFile,
   onNewChat,
@@ -183,9 +208,23 @@ export function AppSidebar({
             </SidebarGroup>
             <SidebarGroup>
               <SidebarGroupLabel>Data</SidebarGroupLabel>
-              <SidebarGroupAction aria-label="Add files" onClick={onAddFiles}>
-                <HugeiconsIcon icon={Add01Icon} strokeWidth={1.5} />
-              </SidebarGroupAction>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={<SidebarGroupAction aria-label="Add data" />}
+                >
+                  <HugeiconsIcon icon={Add01Icon} strokeWidth={1.5} />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem onClick={onAddFiles}>
+                    <HugeiconsIcon icon={File02Icon} strokeWidth={1.5} />
+                    Add files
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={onConnectDatabase}>
+                    <HugeiconsIcon icon={Database01Icon} strokeWidth={1.5} />
+                    Connect a database
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <SidebarMenu className="gap-0">
                 {project.files.map((file) => (
                   <SidebarMenuItem key={file.path}>
@@ -218,6 +257,39 @@ export function AppSidebar({
                     </SidebarMenuAction>
                   </SidebarMenuItem>
                 ))}
+                {project.connections.flatMap((connection) =>
+                  connection.tables.map((table) => {
+                    const label = tableLabel(connection, table)
+                    return (
+                      <SidebarMenuItem key={`${connection.id}/${label}`}>
+                        <SidebarMenuButton
+                          title={`${label}, live from ${connection.host}`}
+                          isActive={view === "data" && label === activeFile}
+                          onClick={() => onOpenDatabaseTable(connection, table)}
+                        >
+                          <HugeiconsIcon
+                            icon={Database01Icon}
+                            strokeWidth={1.5}
+                          />
+                          <span className="truncate">{label}</span>
+                        </SidebarMenuButton>
+                        <SidebarMenuAction
+                          showOnHover
+                          aria-label={`Remove ${label}`}
+                          disabled={isBusy}
+                          onClick={() =>
+                            setRemoval({ kind: "table", connection, table })
+                          }
+                        >
+                          <HugeiconsIcon
+                            icon={Cancel01Icon}
+                            strokeWidth={1.5}
+                          />
+                        </SidebarMenuAction>
+                      </SidebarMenuItem>
+                    )
+                  })
+                )}
               </SidebarMenu>
             </SidebarGroup>
             <SidebarGroup>
@@ -283,6 +355,17 @@ export function AppSidebar({
           description="Davis deletes its copy from this project. Your original file isn't touched, but charts and answers built on this file may stop working."
           action="Remove file"
           onConfirm={() => onRemoveFile(removal.file)}
+          onClose={() => setRemoval(undefined)}
+        />
+      )}
+      {removal?.kind === "table" && (
+        <ConfirmRemoval
+          title={`Remove ${tableLabel(removal.connection, removal.table)}?`}
+          description="Davis stops showing this table. Nothing changes in the database, but charts and answers built on it may stop working."
+          action="Remove table"
+          onConfirm={() =>
+            onRemoveDatabaseTable(removal.connection, removal.table)
+          }
           onClose={() => setRemoval(undefined)}
         />
       )}

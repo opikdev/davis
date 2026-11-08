@@ -2,7 +2,7 @@ use duckdb::Connection;
 use serde::Serialize;
 
 use crate::query::{QueryTable, locked_connection};
-use crate::table::{ColumnKind, TableSource, connect, kind_of, quoted, scan};
+use crate::table::{ColumnKind, TableSource, connect_for, kind_of, quoted, scan};
 use crate::{Error, Result};
 
 const TOP_VALUES: usize = 5;
@@ -71,7 +71,7 @@ fn measures(name: &str, kind: ColumnKind) -> String {
 // One pass over the file, with only what the brief uses, keeps this fast enough
 // to run every time a file opens.
 pub fn profile_table(source: &TableSource) -> Result<Vec<ColumnProfile>> {
-    let connection = connect()?;
+    let connection = connect_for([source])?;
     let from = scan(source, false);
     let columns = describe(&connection, &from)?;
     let kinds: Vec<ColumnKind> = columns
@@ -134,7 +134,7 @@ pub fn column_values(
     column: &str,
     kind: ColumnKind,
 ) -> Result<Vec<ValueCount>> {
-    let connection = connect()?;
+    let connection = connect_for([source])?;
     let from = scan(source, false);
     let name = identifier(column);
     if kind != ColumnKind::Number {
@@ -164,7 +164,7 @@ pub fn column_values(
 }
 
 pub fn column_options(source: &TableSource, column: &str) -> Result<Vec<String>> {
-    let connection = connect()?;
+    let connection = connect_for([source])?;
     let name = identifier(column);
     let mut statement = connection.prepare(&format!(
         "SELECT DISTINCT {name}::VARCHAR AS value FROM {} WHERE {name} IS NOT NULL
@@ -178,7 +178,7 @@ pub fn column_options(source: &TableSource, column: &str) -> Result<Vec<String>>
 }
 
 pub fn column_bounds(source: &TableSource, column: &str) -> Result<Option<(String, String)>> {
-    let connection = connect()?;
+    let connection = connect_for([source])?;
     let name = identifier(column);
     let bounds: (Option<String>, Option<String>) = connection.query_row(
         &format!(
@@ -292,7 +292,7 @@ pub fn combine_tables(
     other_column: &str,
     output: &str,
 ) -> Result<()> {
-    let connection = connect()?;
+    let connection = connect_for([main, other])?;
     let names = |source: &TableSource| -> Result<Vec<String>> {
         let columns = describe(&connection, &scan(source, false))?;
         Ok(columns.into_iter().map(|(name, _)| name).collect())

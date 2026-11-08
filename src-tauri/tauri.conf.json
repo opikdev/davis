@@ -46,7 +46,8 @@
     "shortDescription": "Explore large local data files with AI",
     "longDescription": "Davis opens CSV and Parquet files too big for a spreadsheet, and answers questions about them with the AI you choose. Your files stay on your computer.",
     "macOS": {
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "entitlements": "./Entitlements.plist"
     },
     "icon": [
       "icons/32x32.png",

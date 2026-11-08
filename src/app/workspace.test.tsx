@@ -123,12 +123,25 @@ type Backend = {
   saved?: SavedChatFixture[]
   onSaveChat?: (chat: unknown) => void
   commands?: string[]
+  database?: (command: string, payload: Record<string, unknown>) => unknown
+}
+
+type ConnectionFixture = {
+  id: string
+  name: string
+  host: string
+  port: number
+  database: string
+  user: string
+  ssl: string
+  tables: { schema: string; table: string }[]
 }
 
 type ProjectFixture = {
   path: string
   name: string
   files: { name: string; path: string; sizeBytes: number }[]
+  connections: ConnectionFixture[]
   chats: { id: string; title: string; updatedAt: number }[]
   pages: { id: string; title: string; updatedAt: number }[]
 }
@@ -236,6 +249,16 @@ function fileOf(table: { name: string; source: { path: string } }) {
   return { name: table.name, path: table.source.path, sizeBytes: 4 }
 }
 
+const DATABASE_COMMANDS = [
+  "postgres_support",
+  "install_postgres_support",
+  "test_database",
+  "add_database",
+  "reconnect_database",
+  "remove_database_table",
+  "open_database_table",
+]
+
 function renderWorkspace({
   connected = () => [],
   models = (providerId) =>
@@ -261,6 +284,7 @@ function renderWorkspace({
   saved = [],
   onSaveChat,
   commands,
+  database,
 }: Backend = {}) {
   let current = existing
   const savedPages = new Map(pages.map((page) => [page.id, page]))
@@ -269,6 +293,7 @@ function renderWorkspace({
   mockIPC((command, args) => {
     const payload = args as Record<string, unknown>
     commands?.push(command)
+    if (DATABASE_COMMANDS.includes(command)) return database?.(command, payload)
     if (command === "save_page") {
       const page = payload.page as PageFixture
       savedPages.set(page.id, page)
@@ -358,7 +383,14 @@ function renderWorkspace({
       return current ? [{ path: current.path, name: current.name }] : []
     if (command === "create_project") {
       const name = payload.name as string
-      current = { path: `/docs/${name}`, name, files: [], chats: [], pages: [] }
+      current = {
+        path: `/docs/${name}`,
+        name,
+        files: [],
+        connections: [],
+        chats: [],
+        pages: [],
+      }
       return current
     }
     if (command === "open_project") return { ...current }
@@ -373,6 +405,7 @@ function renderWorkspace({
         path,
         name,
         files,
+        connections: [],
         chats: current?.chats ?? [],
         pages: current?.pages ?? [],
       }
@@ -883,6 +916,7 @@ const SAVED_PROJECT = {
     { name: "other.csv", path: "/docs/Q3/data/other.csv", sizeBytes: 4 },
     { name: "sales.csv", path: "/data/sales.csv", sizeBytes: 4 },
   ],
+  connections: [] as ConnectionFixture[],
   chats: [{ id: "chat-1", title: "Sales by region", updatedAt: 5 }],
   pages: [],
 }
@@ -2454,4 +2488,204 @@ test("the window can be dragged from the top of the sidebar and panel", () => {
   const regions = document.querySelectorAll('[data-tauri-drag-region="deep"]')
 
   expect(regions).toHaveLength(2)
+})
+
+const SHOP: ConnectionFixture = {
+  id: "c1",
+  name: "shop",
+  host: "db.example.com",
+  port: 5432,
+  database: "shop",
+  user: "reader",
+  ssl: "prefer",
+  tables: [{ schema: "public", table: "orders" }],
+}
+
+const LIVE_ORDERS = {
+  ...SALES_TABLE,
+  name: "shop.orders",
+  source: {
+    ...SALES_TABLE.source,
+    remote: { connection: "c1", schema: "public", table: "orders" },
+  },
+}
+
+async function addData(item: string) {
+  const nav = screen.getByRole("navigation", { name: "Main" })
+  await userEvent.click(within(nav).getByRole("button", { name: "Add data" }))
+  await userEvent.click(await screen.findByRole("menuitem", { name: item }))
+}
+
+test("connecting a database downloads support once, then adds the picked tables", async () => {
+  const project = structuredClone(SAVED_PROJECT)
+  const calls: [string, Record<string, unknown>][] = []
+  let isInstalled = false
+  renderWorkspace(
+    projectBackend({
+      project,
+      database: (command, payload) => {
+        calls.push([command, payload])
+        if (command === "postgres_support") return isInstalled
+        if (command === "install_postgres_support") {
+          isInstalled = true
+          return undefined
+        }
+        if (command === "test_database") {
+          return [
+            { schema: "public", table: "customers", estimatedRows: 40 },
+            { schema: "public", table: "orders", estimatedRows: 200000 },
+          ]
+        }
+        if (command === "add_database") {
+          project.connections = [payload.connection as ConnectionFixture]
+          return { ...project }
+        }
+        if (command === "open_database_table") return LIVE_ORDERS
+      },
+    })
+  )
+  await screen.findByText("Saved answer")
+
+  await addData("Connect a database")
+  await userEvent.click(await screen.findByRole("button", { name: "Download" }))
+  await userEvent.type(await screen.findByLabelText("Host"), "db.example.com")
+  await userEvent.type(screen.getByLabelText("Database"), "shop")
+  await userEvent.type(screen.getByLabelText("User"), "reader")
+  await userEvent.type(screen.getByLabelText("Password"), "s3cret")
+  await userEvent.click(screen.getByRole("button", { name: "Test connection" }))
+  await userEvent.click(await screen.findByRole("checkbox", { name: /orders/ }))
+  await userEvent.click(screen.getByRole("button", { name: "Add 1 table" }))
+
+  const added = calls.find(([command]) => command === "add_database")?.[1]
+  expect(added).toMatchObject({
+    password: "s3cret",
+    connection: {
+      name: "shop",
+      host: "db.example.com",
+      port: 5432,
+      user: "reader",
+      tables: [{ schema: "public", table: "orders" }],
+    },
+  })
+  expect(JSON.stringify(added?.connection)).not.toContain("s3cret")
+  const nav = screen.getByRole("navigation", { name: "Main" })
+  expect(
+    await within(nav).findByRole("button", { name: "shop.orders" })
+  ).toBeTruthy()
+  expect(await screen.findByText("EMEA")).toBeTruthy()
+})
+
+test("a database that couldn't be reached says why and keeps the form", async () => {
+  renderWorkspace(
+    projectBackend({
+      database: (command) => {
+        if (command === "postgres_support") return true
+        if (command === "test_database") {
+          throw {
+            kind: "unreachable-database",
+            message:
+              "Couldn't connect to the database. The user name or password is wrong.",
+          }
+        }
+      },
+    })
+  )
+  await screen.findByText("Saved answer")
+
+  await addData("Connect a database")
+  await userEvent.type(await screen.findByLabelText("Host"), "db.example.com")
+  await userEvent.type(screen.getByLabelText("Database"), "shop")
+  await userEvent.type(screen.getByLabelText("User"), "reader")
+  await userEvent.click(screen.getByRole("button", { name: "Test connection" }))
+
+  expect(
+    await screen.findByText(
+      "Couldn't connect to the database. The user name or password is wrong."
+    )
+  ).toBeTruthy()
+  expect(screen.getByLabelText("Host")).toHaveProperty(
+    "value",
+    "db.example.com"
+  )
+})
+
+test("connection names are typed exactly, never capitalized or corrected", async () => {
+  renderWorkspace(projectBackend({ database: () => true }))
+  await screen.findByText("Saved answer")
+
+  await addData("Connect a database")
+
+  for (const label of ["Host", "Database", "User"]) {
+    const field = await screen.findByLabelText(label)
+    expect(field.getAttribute("autocapitalize")).toBe("none")
+    expect(field.getAttribute("autocorrect")).toBe("off")
+    expect(field.getAttribute("spellcheck")).toBe("false")
+  }
+})
+
+test("a database table without its password asks to reconnect, then opens", async () => {
+  const project = { ...structuredClone(SAVED_PROJECT), connections: [SHOP] }
+  let password: unknown
+  renderWorkspace(
+    projectBackend({
+      project,
+      database: (command, payload) => {
+        if (command === "reconnect_database") {
+          password = payload.password
+          return { ...project }
+        }
+        if (command === "open_database_table") {
+          if (password) return LIVE_ORDERS
+          throw {
+            kind: "disconnected-database",
+            message: "This database needs its password again.",
+          }
+        }
+      },
+    })
+  )
+  await screen.findByText("Saved answer")
+
+  const nav = screen.getByRole("navigation", { name: "Main" })
+  await userEvent.click(
+    await within(nav).findByRole("button", { name: "shop.orders" })
+  )
+  await userEvent.type(await screen.findByLabelText("Password"), "s3cret")
+  await userEvent.click(screen.getByRole("button", { name: "Reconnect" }))
+
+  expect(password).toBe("s3cret")
+  expect(await screen.findByText("EMEA")).toBeTruthy()
+})
+
+test("removing a database table asks first and leaves the database alone", async () => {
+  const project = { ...structuredClone(SAVED_PROJECT), connections: [SHOP] }
+  const removed: unknown[] = []
+  renderWorkspace(
+    projectBackend({
+      project,
+      database: (command, payload) => {
+        if (command === "remove_database_table") {
+          removed.push(payload)
+          project.connections = []
+          return { ...project }
+        }
+      },
+    })
+  )
+  await screen.findByText("Saved answer")
+
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Remove shop.orders" })
+  )
+  expect(screen.getByText(/Nothing changes in the database/)).toBeTruthy()
+  await userEvent.click(screen.getByRole("button", { name: "Remove table" }))
+
+  await waitFor(() =>
+    expect(removed).toEqual([
+      { project: "/docs/Q3", id: "c1", schema: "public", table: "orders" },
+    ])
+  )
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "shop.orders" })).toBeNull()
+  )
 })

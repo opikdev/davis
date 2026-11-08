@@ -26,7 +26,7 @@ Dependencies point one way. The crates know nothing about Tauri or React, so the
 | `crates/core/`            | Queries, profiling, and data logic                                            | Depend on Tauri                          |
 | `crates/ai/`              | Providers, keys, settings, and talking to models with tools                   | Know about data or SQL                   |
 | `crates/agent/`           | The analyst: its tools, its prompt, and what the AI may see                   | Depend on Tauri                          |
-| `crates/project/`         | Project folders, saved chats and Pages, and turning workbooks into tables     | Depend on Tauri                          |
+| `crates/project/`         | Project folders, saved chats, Pages and connections, and turning workbooks into tables | Depend on Tauri                          |
 
 ## Why it is built this way
 
@@ -54,6 +54,16 @@ The AI must never read the user's files directly. It only gets what Davis hands 
 - **Numbers:** answers reference query results, and Davis fills in the values, so the model can't invent a number the user sees as fact.
 
 A CLI's sandbox is not enough on its own. Codex's `read-only` sandbox only blocks writes, so with a shell it can read any file. Codex and OpenCode therefore run with their tools off and answer one query at a time.
+
+## Live databases
+
+A project can read Postgres tables live, as well as files. `crates/core/src/database.rs` attaches each database to every DuckDB connection that needs it, so filters, Pages, links and the AI treat a live table like a file.
+
+- **Read-only, three times over:** the database is attached `READ_ONLY`, so Postgres itself refuses writes, and `require_one_select` blocks `postgres_query`, `postgres_execute` and the other `postgres_*` functions, which run any SQL given to them. People should still connect with a read-only user.
+- **Passwords:** a connection is saved in the project's `connections/` folder without its password, which goes in the system keychain. Logins are loaded from the keychain once per run into a registry in the core, because table sources travel to the frontend and back and must never carry a password.
+- **The extension:** DuckDB's Postgres extension, about 45 MB, is downloaded only when someone agrees to it, into the app's local data folder. DuckDB checks its signature before loading it. Released Mac builds have the hardened runtime, so `src-tauri/Entitlements.plist` allows libraries signed by someone else, which this extension is.
+- **Speed:** each chart and question runs on the database. Row counts for the AI come from Postgres's estimate when it has one.
+- **Tests:** the live tests in `database.rs` run when `DAVIS_TEST_POSTGRES` points at a database loaded with `crates/core/fixtures/postgres.sql`. CI runs them on Linux.
 
 ## Pages
 

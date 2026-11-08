@@ -51,4 +51,6 @@ jobs:
           args: ${{ matrix.args }}
       - name: Check the Mac app is sealed
         if: runner.os == 'macOS'
-        run: codesign --verify --deep --strict --verbose=2 target/universal-apple-darwin/release/bundle/macos/Davis.app
+        run: |
+          codesign --verify --deep --strict --verbose=2 target/universal-apple-darwin/release/bundle/macos/Davis.app
+          codesign -d --entitlements - target/universal-apple-darwin/release/bundle/macos/Davis.app | grep -q disable-library-validation

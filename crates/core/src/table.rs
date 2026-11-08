@@ -5,6 +5,7 @@ use std::path::Path;
 use duckdb::Connection;
 use serde::{Deserialize, Serialize};
 
+use crate::database::{RemoteTable, attach_sources, estimated_rows, remote_scan};
 use crate::{Error, Result};
 
 const ENCODING_SAMPLE_BYTES: u64 = 1024 * 1024;
@@ -41,6 +42,9 @@ pub struct TableSource {
     pub format: Format,
     pub encoding: Encoding,
     pub repair: Repair,
+    // A table read live from a database, which leaves the file fields unused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<RemoteTable>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,6 +96,7 @@ pub fn open_table(path: &str) -> Result<OpenedTable> {
         format,
         encoding,
         repair: Repair::None,
+        remote: None,
     };
 
     let opened = if format == Format::Csv {
@@ -113,8 +118,47 @@ pub fn open_table(path: &str) -> Result<OpenedTable> {
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowCount {
+    Exact,
+    // Postgres keeps an estimate for tables it has analyzed, which spares
+    // counting a big table every time a question is asked.
+    Estimated,
+}
+
+pub fn open_remote_table(
+    remote: RemoteTable,
+    name: String,
+    count: RowCount,
+) -> Result<OpenedTable> {
+    let source = TableSource {
+        path: format!("{}.{}", remote.schema, remote.table),
+        format: Format::Parquet,
+        encoding: Encoding::Utf8,
+        repair: Repair::None,
+        remote: Some(remote),
+    };
+    let connection = connect_for([&source])?;
+    let columns = read_columns(&connection, &source)?;
+    let estimate = match (count, &source.remote) {
+        (RowCount::Estimated, Some(remote)) => estimated_rows(&connection, remote)?,
+        _ => None,
+    };
+    let row_count = match estimate {
+        Some(rows) => rows,
+        None => count_rows(&connection, &source)?,
+    };
+    Ok(OpenedTable {
+        source,
+        name,
+        row_count,
+        skipped_rows: 0,
+        columns,
+    })
+}
+
 pub fn read_rows(source: &TableSource, offset: u64, limit: u64) -> Result<Vec<Row>> {
-    let connection = connect()?;
+    let connection = connect_for([source])?;
     let limit = limit.min(MAX_ROWS_PER_READ);
     let sql = format!(
         "SELECT COLUMNS(*)::VARCHAR FROM {} LIMIT {limit} OFFSET {offset}",
@@ -138,6 +182,14 @@ pub(crate) fn connect() -> Result<Connection> {
     connection.execute_batch(
         "SET autoinstall_known_extensions = false; SET autoload_known_extensions = false;",
     )?;
+    Ok(connection)
+}
+
+pub(crate) fn connect_for<'a>(
+    sources: impl IntoIterator<Item = &'a TableSource>,
+) -> Result<Connection> {
+    let connection = connect()?;
+    attach_sources(&connection, sources)?;
     Ok(connection)
 }
 
@@ -292,6 +344,9 @@ pub(crate) fn kind_of(data_type: &str) -> ColumnKind {
 
 // Rows are read as plain text so what's shown is exactly what the file holds.
 pub(crate) fn scan(source: &TableSource, as_text: bool) -> String {
+    if let Some(remote) = &source.remote {
+        return remote_scan(remote);
+    }
     let path = quoted(&without_wildcards(&source.path));
     match source.format {
         Format::Parquet => format!("read_parquet({path})"),

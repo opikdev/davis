@@ -37,6 +37,15 @@ import {
 } from "@/components/ui/sidebar"
 import { ModelPicker } from "@/features/ai-setup"
 import {
+  ConnectDatabaseDialog,
+  openDatabaseTable,
+  ReconnectDialog,
+  removeDatabaseTable,
+  tableLabel,
+  type ConnectedTable,
+  type DatabaseConnection,
+} from "@/features/connections"
+import {
   ChatPanel,
   deleteChat,
   useChat,
@@ -75,7 +84,7 @@ import {
   type Project,
   type ProjectFile,
 } from "@/features/projects"
-import { toErrorMessage } from "@/lib/ipc-error"
+import { errorKind, toErrorMessage } from "@/lib/ipc-error"
 import { cn } from "@/lib/utils"
 
 const CHAT_WIDTH = "19rem"
@@ -285,6 +294,11 @@ export function Workspace() {
   }, [reloadPage])
   const onPageChanged = useCallback(() => void reloadRef.current(), [])
   const [askedBlockId, setAskedBlockId] = useState<string>()
+  const [isConnecting, setIsConnecting] = useState(false)
+  const [reconnecting, setReconnecting] = useState<{
+    connection: DatabaseConnection
+    table: ConnectedTable
+  }>()
   const [replacement, setReplacement] = useState<{
     file: ProjectFile
     path: string
@@ -471,6 +485,35 @@ export function Workspace() {
     setView("home")
   }
 
+  function openDatabase(connection: DatabaseConnection, table: ConnectedTable) {
+    if (!project) return
+    const path = project.path
+    setView("data")
+    void files.load(tableLabel(connection, table), async () => {
+      try {
+        return await openDatabaseTable(path, connection.id, table)
+      } catch (failure) {
+        if (errorKind(failure) === "disconnected-database") {
+          setReconnecting({ connection, table })
+        }
+        throw failure
+      }
+    })
+  }
+
+  async function removeDatabase(
+    connection: DatabaseConnection,
+    table: ConnectedTable
+  ) {
+    if (!project) return
+    await removeDatabaseTable(project.path, connection.id, table)
+    await refresh(project.path)
+    if (files.table?.name === tableLabel(connection, table)) {
+      files.close()
+      setView("home")
+    }
+  }
+
   async function removeFile(file: ProjectFile) {
     if (!project) return
     await removeProjectFile(project.path, file.name)
@@ -539,7 +582,12 @@ export function Workspace() {
         onDeletePage={(summary) => void pages.remove(summary.id)}
         onViewChange={setView}
         onAddFiles={() => void browse()}
+        onConnectDatabase={() => setIsConnecting(true)}
         onOpenFile={openFile}
+        onOpenDatabaseTable={openDatabase}
+        onRemoveDatabaseTable={(connection, table) =>
+          void removeDatabase(connection, table).catch(reportReplaceFailure)
+        }
         onReplaceFile={(file) =>
           void replaceFile(file).catch(reportReplaceFailure)
         }
@@ -548,6 +596,33 @@ export function Workspace() {
         onOpenChat={(summary) => void openChat(summary)}
         onDeleteChat={(summary) => void removeChat(summary)}
       />
+      {isConnecting && project && (
+        <ConnectDatabaseDialog
+          project={project}
+          onAdded={(updated, connectionId) => {
+            setIsConnecting(false)
+            void refresh(updated.path)
+            const connection = updated.connections.find(
+              ({ id }) => id === connectionId
+            )
+            if (connection) openDatabase(connection, connection.tables[0])
+          }}
+          onClose={() => setIsConnecting(false)}
+        />
+      )}
+      {reconnecting && project && (
+        <ReconnectDialog
+          project={project.path}
+          connection={reconnecting.connection}
+          onReconnected={(updated) => {
+            const { connection, table } = reconnecting
+            setReconnecting(undefined)
+            void refresh(updated.path)
+            openDatabase(connection, table)
+          }}
+          onClose={() => setReconnecting(undefined)}
+        />
+      )}
       {replacement && (
         <ConfirmRemoval
           title={`Replace ${replacement.file.name}?`}
@@ -595,7 +670,9 @@ export function Workspace() {
                   files={files}
                   project={project?.path}
                   pages={pages}
-                  hasData={Boolean(project?.files.length)}
+                  hasData={Boolean(
+                    project?.files.length || project?.connections.length
+                  )}
                   isAsking={chat.isAsking}
                   onNewPage={() => void newPage()}
                   projectName={project?.name}

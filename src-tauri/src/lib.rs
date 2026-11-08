@@ -1,3 +1,5 @@
+use tauri::Manager;
+
 mod commands;
 mod error;
 
@@ -7,6 +9,11 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            let extensions = app.path().app_local_data_dir()?.join("duckdb-extensions");
+            davis_core::set_extension_folder(&extensions);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::ai::choose_model,
             commands::ai::chosen_model,
@@ -22,6 +29,13 @@ pub fn run() {
             commands::chat::answer_agent,
             commands::chat::ask_project,
             commands::chat::stop_asking,
+            commands::database::add_database,
+            commands::database::install_postgres_support,
+            commands::database::open_database_table,
+            commands::database::postgres_support,
+            commands::database::reconnect_database,
+            commands::database::remove_database_table,
+            commands::database::test_database,
             commands::engine::engine_info,
             commands::engine::open_table,
             commands::engine::column_values,

@@ -15,6 +15,16 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
+    # Service containers only run on Linux, so the live database tests run there.
+    services:
+      postgres:
+        image: ${{ matrix.os == 'ubuntu-22.04' && 'postgres:17' || '' }}
+        env:
+          POSTGRES_PASSWORD: davis-test
+          POSTGRES_DB: davis_test
+        ports:
+          - 5432:5432
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -31,7 +41,14 @@ jobs:
         with:
           cache: true
       - run: pnpm install --frozen-lockfile
+      - name: Load the test database
+        if: runner.os == 'Linux'
+        run: psql -h localhost -U postgres -d davis_test -f crates/core/fixtures/postgres.sql
+        env:
+          PGPASSWORD: davis-test
       - run: pnpm check
+        env:
+          DAVIS_TEST_POSTGRES: ${{ runner.os == 'Linux' && 'postgres://postgres:davis-test@localhost:5432/davis_test' || '' }}
       - run: pnpm tauri build --debug
       - name: Install the WebDriver tools
         if: runner.os == 'Linux'

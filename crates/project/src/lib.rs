@@ -1,4 +1,5 @@
 mod chats;
+mod connections;
 mod error;
 mod pages;
 mod pdf;
@@ -8,6 +9,10 @@ mod storage;
 mod workbook;
 
 pub use chats::{Chat, ChatSummary, delete_chat, read_chat, save_chat};
+pub use connections::{
+    ConnectedTable, DatabaseConnection, forget_password, list_connections, remove_connection,
+    save_connection, save_password, saved_password,
+};
 pub use error::{Error, Result};
 pub use pages::{
     Block, BlockKind, FilterKind, Page, PageFilter, PageRow, PageSummary, change_page, delete_page,

@@ -7,7 +7,7 @@ use duckdb::{Connection, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::table::{Column, Row, TableSource, connect, kind_of, quoted, scan};
+use crate::table::{Column, Row, TableSource, connect_for, kind_of, quoted, scan};
 use crate::{Error, Result};
 
 const MAX_RESULT_ROWS: usize = 1_000;
@@ -197,7 +197,12 @@ fn run_query_within(
 // The views are created before lockdown because lockdown can't be undone. The files
 // stay writable through `allowed_paths`, so `require_one_select` is what protects them.
 pub(crate) fn locked_connection(tables: &[QueryTable]) -> Result<Connection> {
-    let connection = connect()?;
+    let linked = tables
+        .iter()
+        .flat_map(|table| &table.filters)
+        .filter_map(|filter| filter.through.as_ref())
+        .map(|link| &link.source);
+    let connection = connect_for(tables.iter().map(|table| &table.source).chain(linked))?;
     let views: String = tables
         .iter()
         .map(|table| {
@@ -211,6 +216,7 @@ pub(crate) fn locked_connection(tables: &[QueryTable]) -> Result<Connection> {
         .collect();
     let paths = tables
         .iter()
+        .filter(|table| table.source.remote.is_none())
         .map(|table| quoted(&table.source.path))
         .collect::<Vec<_>>()
         .join(", ");
@@ -238,10 +244,27 @@ fn require_one_select(connection: &Connection, sql: &str) -> Result<()> {
             Error::RejectedQuery
         });
     }
-    if statements == 1 {
+    if statements == 1 && !calls_database_function(&parsed) {
         Ok(())
     } else {
         Err(Error::RejectedQuery)
+    }
+}
+
+// These run whatever SQL they're given on the database itself, outside the
+// read-only checks here.
+fn calls_database_function(value: &Value) -> bool {
+    match value {
+        Value::Object(fields) => {
+            let is_direct = fields
+                .get("function_name")
+                .and_then(Value::as_str)
+                .map(str::to_lowercase)
+                .is_some_and(|name| name.starts_with("postgres_") || name.starts_with("pg_"));
+            is_direct || fields.values().any(calls_database_function)
+        }
+        Value::Array(items) => items.iter().any(calls_database_function),
+        _ => false,
     }
 }
 
@@ -455,6 +478,8 @@ mod tests {
             "INSTALL httpfs",
             "SET threads = 1",
             "SELECT 1; SELECT 2",
+            "SELECT * FROM postgres_query('db', 'DELETE FROM t')",
+            "SELECT 1 WHERE EXISTS (SELECT * FROM Postgres_Execute('db', 'DROP TABLE t'))",
         ] {
             assert_eq!(code(&source, sql), "rejected-query", "{sql}");
         }

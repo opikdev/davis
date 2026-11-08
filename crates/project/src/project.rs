@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::chats::{CHATS_FOLDER, ChatSummary, list_chats};
+use crate::connections::{DatabaseConnection, list_connections};
 use crate::pages::{PAGES_FOLDER, PageSummary, list_pages};
 use crate::storage::write_json;
 use crate::workbook::is_workbook;
@@ -35,6 +36,7 @@ pub struct Project {
     pub path: String,
     pub name: String,
     pub files: Vec<ProjectFile>,
+    pub connections: Vec<DatabaseConnection>,
     pub chats: Vec<ChatSummary>,
     pub pages: Vec<PageSummary>,
 }
@@ -113,6 +115,7 @@ pub fn read_project(folder: &Path) -> Result<Project> {
         path: folder.to_string_lossy().into_owned(),
         name: folder_name(folder),
         files: list_files(folder)?,
+        connections: list_connections(folder)?,
         chats: list_chats(folder)?,
         pages: list_pages(folder)?,
     })

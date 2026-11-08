@@ -1206,6 +1206,8 @@ version = "0.1.0"
 dependencies = [
  "calamine",
  "chrono",
+ "davis-core",
+ "keyring",
  "pdf-writer",
  "rust_xlsxwriter",
  "serde",
