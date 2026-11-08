@@ -121,8 +121,19 @@ function TableBody({
   isExporting?: boolean
 }) {
   const rows = arrangedRows(block, result)
+  // The grouping column keeps its own text, so a year never reads as 2,015.
+  const formatNumber = (value: string, column: string) =>
+    column === block.xColumn
+      ? value
+      : formatValue(value, column === block.yColumn ? block.format : null)
   if (isExporting) {
-    return <ResultTable result={{ ...result, rows }} rowLimit={EXPORTED_ROWS} />
+    return (
+      <ResultTable
+        result={{ ...result, rows }}
+        rowLimit={EXPORTED_ROWS}
+        formatNumber={formatNumber}
+      />
+    )
   }
   return (
     <div
@@ -131,7 +142,11 @@ function TableBody({
       tabIndex={0}
       className="max-h-80 min-h-0 flex-1 overflow-auto"
     >
-      <ResultTable result={{ ...result, rows }} rowLimit={ALL_ROWS} />
+      <ResultTable
+        result={{ ...result, rows }}
+        rowLimit={ALL_ROWS}
+        formatNumber={formatNumber}
+      />
     </div>
   )
 }

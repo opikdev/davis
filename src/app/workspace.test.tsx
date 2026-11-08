@@ -1405,7 +1405,7 @@ test("a Page runs its blocks, and one failure stays in its block", async () => {
   await openOverview()
 
   expect(await screen.findByText("That query failed.")).toBeTruthy()
-  expect(await screen.findByRole("cell", { name: "1500" })).toBeTruthy()
+  expect(await screen.findByRole("cell", { name: "1,500" })).toBeTruthy()
   expect(screen.getByRole("heading", { name: "Totals" })).toBeTruthy()
 })
 

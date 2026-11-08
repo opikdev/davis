@@ -24,9 +24,11 @@ const PREVIEW_ROWS = 8
 export function ResultTable({
   result,
   rowLimit = PREVIEW_ROWS,
+  formatNumber,
 }: {
   result: QueryResult
   rowLimit?: number
+  formatNumber?: (value: string, column: string) => string
 }) {
   const { columns, rows, isTruncated } = result
   const shown = rows.slice(0, rowLimit)
@@ -62,7 +64,13 @@ export function ResultTable({
                       column.kind === "number" && "text-right tabular-nums"
                     )}
                   >
-                    {row[cell] ?? <span className="text-subtle">null</span>}
+                    {row[cell] === null ? (
+                      <span className="text-subtle">null</span>
+                    ) : column.kind === "number" && formatNumber ? (
+                      formatNumber(row[cell], column.name)
+                    ) : (
+                      row[cell]
+                    )}
                   </TableCell>
                 ))}
               </TableRow>
