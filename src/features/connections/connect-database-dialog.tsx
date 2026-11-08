@@ -39,6 +39,7 @@ import {
   type SslMode,
 } from "@/features/connections/api"
 import type { Project } from "@/features/projects"
+import { DatabaseIcon } from "@/features/connections/database-icon"
 import { toErrorMessage } from "@/lib/ipc-error"
 
 const KINDS: { value: DatabaseKind; label: string; port: number }[] = [
@@ -256,6 +257,7 @@ export function ConnectDatabaseDialog({
                       size="sm"
                       variant="outline"
                     >
+                      <DatabaseIcon kind={value} />
                       {label}
                     </ToggleGroupItem>
                   ))}

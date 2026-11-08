@@ -35,6 +35,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import {
+  DatabaseIcon,
   tableLabel,
   type ConnectedTable,
   type DatabaseConnection,
@@ -267,10 +268,7 @@ export function AppSidebar({
                           isActive={view === "data" && label === activeFile}
                           onClick={() => onOpenDatabaseTable(connection, table)}
                         >
-                          <HugeiconsIcon
-                            icon={Database01Icon}
-                            strokeWidth={1.5}
-                          />
+                          <DatabaseIcon kind={connection.kind} />
                           <span className="truncate">{label}</span>
                         </SidebarMenuButton>
                         <SidebarMenuAction

@@ -2680,6 +2680,8 @@ test("removing a database table asks first and leaves the database alone", async
   )
   await screen.findByText("Saved answer")
 
+  const table = await screen.findByRole("button", { name: "shop.orders" })
+  expect(table.querySelector('[data-icon="postgres"]')).toBeTruthy()
   await userEvent.click(
     await screen.findByRole("button", { name: "Remove shop.orders" })
   )
