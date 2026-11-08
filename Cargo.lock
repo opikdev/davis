@@ -1147,7 +1147,7 @@ dependencies = [
 
 [[package]]
 name = "davis"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "davis-agent",
@@ -1167,7 +1167,7 @@ dependencies = [
 
 [[package]]
 name = "davis-agent"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "davis-ai",
  "davis-core",
@@ -1179,7 +1179,7 @@ dependencies = [
 
 [[package]]
 name = "davis-ai"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "getrandom 0.3.4",
  "keyring",
@@ -1193,7 +1193,7 @@ dependencies = [
 
 [[package]]
 name = "davis-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "duckdb",
  "serde",
@@ -1203,7 +1203,7 @@ dependencies = [
 
 [[package]]
 name = "davis-library"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "davis-core",
  "davis-project",
@@ -1217,7 +1217,7 @@ dependencies = [
 
 [[package]]
 name = "davis-project"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "calamine",
  "chrono",
