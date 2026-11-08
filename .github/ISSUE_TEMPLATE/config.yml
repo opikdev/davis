@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/opikdev/davis/security/advisories/new
+    about: Report it privately, never in a public issue
+  - name: Install help
+    url: https://github.com/opikdev/davis/blob/main/docs/install.md
+    about: How to get past the macOS and Windows warnings on first open
