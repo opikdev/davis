@@ -303,7 +303,8 @@ function renderWorkspace({
     commands?.push(command)
     if (DATABASE_COMMANDS.includes(command)) return database?.(command, payload)
     if (command === "library_datasets" || command === "import_dataset") {
-      return library?.(command, payload)
+      if (library) return library(command, payload)
+      return command === "library_datasets" ? [] : undefined
     }
     if (command === "save_page") {
       const page = payload.page as PageFixture
@@ -481,29 +482,29 @@ test("the main screen invites a file drop", () => {
   expect(screen.getByRole("button", { name: "Browse files" })).toBeTruthy()
 })
 
-test("offers connections and sample datasets, with no model picker", () => {
-  renderWorkspace()
+test("offers databases and Library datasets, with no model picker", async () => {
+  renderWorkspace({
+    library: (command) =>
+      command === "library_datasets" ? [WORLD, FLIGHTS] : undefined,
+  })
 
-  for (const name of [
-    /PostgreSQL/,
-    /MySQL/,
-    /Cloud storage/,
-    /Online retail/,
-    /Bank marketing/,
-    /Bike sharing/,
-  ]) {
+  expect(
+    await screen.findByRole("button", { name: /World development/ })
+  ).toBeTruthy()
+  for (const name of [/PostgreSQL/, /MySQL/, /Browse the Library/]) {
     expect(screen.getByRole("button", { name })).toBeTruthy()
   }
+  expect(screen.queryByRole("button", { name: /US flight delays/ })).toBeNull()
   expect(screen.queryByRole("button", { name: "Choose a model" })).toBeNull()
 })
 
-test("says plainly that connections aren't ready yet", async () => {
+test("connecting a database asks for a project first", async () => {
   renderWorkspace()
 
   await userEvent.click(screen.getByRole("button", { name: /PostgreSQL/ }))
 
   expect(screen.getByRole("status").textContent).toBe(
-    "Connections and sample datasets are coming next."
+    "Open or create a project first, then connect a database."
   )
 })
 
@@ -2887,6 +2888,43 @@ async function openLibrary() {
   await userEvent.click(within(nav).getByRole("button", { name: "Library" }))
   await screen.findByRole("heading", { name: "Library", level: 1 })
 }
+
+async function goHome() {
+  const nav = screen.getByRole("navigation", { name: "Main" })
+  await userEvent.click(within(nav).getByRole("button", { name: "Home" }))
+}
+
+test("a database on Home opens the connect form for that type", async () => {
+  renderWorkspace(projectBackend())
+  await screen.findByText("Saved answer")
+
+  await goHome()
+  await userEvent.click(screen.getByRole("button", { name: /MySQL/ }))
+
+  expect(await screen.findByLabelText("Port")).toHaveProperty("value", "3306")
+})
+
+test("a dataset on Home opens its details in the Library", async () => {
+  renderWorkspace(
+    projectBackend({
+      library: (command) =>
+        command === "library_datasets" ? [WORLD] : undefined,
+    })
+  )
+  await screen.findByText("Saved answer")
+
+  await goHome()
+  await userEvent.click(
+    await screen.findByRole("button", { name: /World development/ })
+  )
+
+  expect(
+    await screen.findByText(/Do richer countries live longer/)
+  ).toBeTruthy()
+  expect(
+    screen.getByRole("heading", { name: "Library", level: 1, hidden: true })
+  ).toBeTruthy()
+})
 
 test("the library sorts datasets by category and finds them by search", async () => {
   renderWorkspace(

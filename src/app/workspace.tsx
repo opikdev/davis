@@ -45,6 +45,7 @@ import {
   tableLabel,
   type ConnectedTable,
   type DatabaseConnection,
+  type DatabaseKind,
 } from "@/features/connections"
 import {
   ChatPanel,
@@ -189,6 +190,10 @@ type CurrentViewProps = {
   credits: string[]
   currentProject?: Project
   onImported: (imported: ImportedDataset) => void
+  libraryDataset?: string
+  onConnect: (kind: DatabaseKind) => void
+  onOpenDataset: (id: string) => void
+  onOpenLibrary: () => void
 }
 
 function CurrentView({
@@ -207,10 +212,20 @@ function CurrentView({
   credits,
   currentProject,
   onImported,
+  libraryDataset,
+  onConnect,
+  onOpenDataset,
+  onOpenLibrary,
 }: CurrentViewProps) {
   switch (view) {
     case "library":
-      return <LibraryView project={currentProject} onImported={onImported} />
+      return (
+        <LibraryView
+          project={currentProject}
+          openDatasetId={libraryDataset}
+          onImported={onImported}
+        />
+      )
     case "home":
       return (
         <Home
@@ -219,6 +234,9 @@ function CurrentView({
           openingName={files.openingName}
           error={error ?? files.error}
           onBrowse={onBrowse}
+          onConnect={onConnect}
+          onOpenDataset={onOpenDataset}
+          onOpenLibrary={onOpenLibrary}
         />
       )
     case "data":
@@ -307,7 +325,8 @@ export function Workspace() {
   }, [reloadPage])
   const onPageChanged = useCallback(() => void reloadRef.current(), [])
   const [askedBlockId, setAskedBlockId] = useState<string>()
-  const [isConnecting, setIsConnecting] = useState(false)
+  const [connectKind, setConnectKind] = useState<DatabaseKind>()
+  const [libraryDataset, setLibraryDataset] = useState<string>()
   const pendingPage = useRef<string>(undefined)
   const [reconnecting, setReconnecting] = useState<{
     connection: DatabaseConnection
@@ -623,9 +642,12 @@ export function Workspace() {
         onNewPage={() => void newPage()}
         onOpenPage={(summary) => void openPage(summary)}
         onDeletePage={(summary) => void pages.remove(summary.id)}
-        onViewChange={setView}
+        onViewChange={(next) => {
+          setLibraryDataset(undefined)
+          setView(next)
+        }}
         onAddFiles={() => void browse()}
-        onConnectDatabase={() => setIsConnecting(true)}
+        onConnectDatabase={() => setConnectKind("postgres")}
         onOpenFile={openFile}
         onOpenDatabaseTable={openDatabase}
         onRemoveDatabaseTable={(connection, table) =>
@@ -639,18 +661,19 @@ export function Workspace() {
         onOpenChat={(summary) => void openChat(summary)}
         onDeleteChat={(summary) => void removeChat(summary)}
       />
-      {isConnecting && project && (
+      {connectKind && project && (
         <ConnectDatabaseDialog
           project={project}
+          initialKind={connectKind}
           onAdded={(updated, connectionId) => {
-            setIsConnecting(false)
+            setConnectKind(undefined)
             void refresh(updated.path)
             const connection = updated.connections.find(
               ({ id }) => id === connectionId
             )
             if (connection) openDatabase(connection, connection.tables[0])
           }}
-          onClose={() => setIsConnecting(false)}
+          onClose={() => setConnectKind(undefined)}
         />
       )}
       {reconnecting && project && (
@@ -728,6 +751,13 @@ export function Workspace() {
                   onImported={(imported) =>
                     void showImported(imported).catch(reportReplaceFailure)
                   }
+                  libraryDataset={libraryDataset}
+                  onConnect={setConnectKind}
+                  onOpenDataset={(id) => {
+                    setLibraryDataset(id)
+                    setView("library")
+                  }}
+                  onOpenLibrary={() => setView("library")}
                   onReconnect={(connectionId) => {
                     const connection = project?.connections.find(
                       ({ id }) => id === connectionId

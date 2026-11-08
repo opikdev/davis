@@ -68,6 +68,7 @@ function kindOf(value: DatabaseKind) {
 
 type ConnectDatabaseDialogProps = {
   project: Project
+  initialKind?: DatabaseKind
   onAdded: (project: Project, connectionId: string) => void
   onClose: () => void
 }
@@ -87,14 +88,15 @@ function freeName(project: Project, database: string) {
 
 export function ConnectDatabaseDialog({
   project,
+  initialKind = "postgres",
   onAdded,
   onClose,
 }: ConnectDatabaseDialogProps) {
   const [step, setStep] = useState<Step>("details")
   const [login, setLogin] = useState<DatabaseLogin>({
-    kind: "postgres",
+    kind: initialKind,
     host: "",
-    port: KINDS[0].port,
+    port: kindOf(initialKind).port,
     database: "",
     user: "",
     password: "",

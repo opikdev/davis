@@ -30,6 +30,7 @@ import { toErrorMessage } from "@/lib/ipc-error"
 
 type LibraryViewProps = {
   project?: Project
+  openDatasetId?: string
   onImported: (imported: ImportedDataset) => void
 }
 
@@ -72,13 +73,17 @@ function DatasetItem({
   )
 }
 
-export function LibraryView({ project, onImported }: LibraryViewProps) {
+export function LibraryView({
+  project,
+  openDatasetId,
+  onImported,
+}: LibraryViewProps) {
   const [datasets, setDatasets] = useState<Dataset[]>()
   const [error, setError] = useState<string>()
   const [search, setSearch] = useState("")
   const [category, setCategory] = useState<Category>()
-  const [openId, setOpenId] = useState<string>()
-  const [isOpen, setIsOpen] = useState(false)
+  const [openId, setOpenId] = useState(openDatasetId)
+  const [isOpen, setIsOpen] = useState(Boolean(openDatasetId))
 
   useEffect(() => {
     libraryDatasets()

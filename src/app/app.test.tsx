@@ -46,6 +46,7 @@ function mockBackend(onboardingStatus: () => unknown) {
     if (command === "connected_providers") return []
     if (command === "recent_projects") return []
     if (command === "last_project") return null
+    if (command === "library_datasets") return []
     return undefined
   })
   return commands

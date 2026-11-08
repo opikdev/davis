@@ -1,30 +1,54 @@
 import {
-  Bicycle01Icon,
-  CloudIcon,
-  Megaphone01Icon,
+  ArrowRight01Icon,
+  Basketball01Icon,
+  ComputerIcon,
+  FlashIcon,
+  Globe02Icon,
+  Leaf01Icon,
+  Route01Icon,
   ShoppingBag01Icon,
+  Sun03Icon,
 } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import mysqlIcon from "@/features/home/connection-icons/mysql.svg"
-import postgresqlIcon from "@/features/home/connection-icons/postgresql.svg"
+import { DatabaseIcon, type DatabaseKind } from "@/features/connections"
+import {
+  libraryDatasets,
+  type Category,
+  type Dataset,
+} from "@/features/library/api"
+import { toErrorMessage } from "@/lib/ipc-error"
 import { cn } from "@/lib/utils"
 
-const NOT_READY = "Connections and sample datasets are coming next."
+const NEEDS_PROJECT = "Open or create a project first, then connect a database."
+const SHOWN_DATASETS = 3
 
-const CONNECTIONS = [
-  { logo: postgresqlIcon, color: "#336791", name: "PostgreSQL" },
-  { logo: mysqlIcon, color: "#00758f", name: "MySQL" },
+const CONNECTIONS: { kind: DatabaseKind; color: string; name: string }[] = [
+  { kind: "postgres", color: "#336791", name: "PostgreSQL" },
+  { kind: "mysql", color: "#00758f", name: "MySQL" },
 ]
 
-const DATASETS: { icon: IconSvgElement; name: string; size: string }[] = [
-  { icon: ShoppingBag01Icon, name: "Online retail", size: "1.07M rows" },
-  { icon: Megaphone01Icon, name: "Bank marketing", size: "45K rows" },
-  { icon: Bicycle01Icon, name: "Bike sharing", size: "17K rows" },
-]
+const CATEGORY_ICONS: Record<Category, IconSvgElement> = {
+  business: ShoppingBag01Icon,
+  world: Globe02Icon,
+  climate: Sun03Icon,
+  energy: FlashIcon,
+  transport: Route01Icon,
+  nature: Leaf01Icon,
+  technology: ComputerIcon,
+  sports: Basketball01Icon,
+}
+
+function IconTile({ icon }: { icon: IconSvgElement }) {
+  return (
+    <span className="grid size-4.5 shrink-0 place-items-center rounded-sm bg-muted">
+      <HugeiconsIcon icon={icon} strokeWidth={1.5} className="size-3" />
+    </span>
+  )
+}
 
 function SourceRow({
   tile,
@@ -75,6 +99,9 @@ type HomeProps = {
   openingName?: string
   error?: string
   onBrowse: () => void
+  onConnect: (kind: DatabaseKind) => void
+  onOpenDataset: (id: string) => void
+  onOpenLibrary: () => void
 }
 
 export function Home({
@@ -83,9 +110,22 @@ export function Home({
   openingName,
   error,
   onBrowse,
+  onConnect,
+  onOpenDataset,
+  onOpenLibrary,
 }: HomeProps) {
   const [notice, setNotice] = useState("")
-  const showNotReady = () => setNotice(NOT_READY)
+  const [datasets, setDatasets] = useState<Dataset[]>([])
+
+  useEffect(() => {
+    libraryDatasets()
+      .then(setDatasets)
+      .catch((failure: unknown) => setNotice(toErrorMessage(failure)))
+  }, [])
+
+  const featured = datasets
+    .filter((dataset) => dataset.isFeatured)
+    .slice(0, SHOWN_DATASETS)
   const title = openingName
     ? `Opening ${openingName}`
     : isDragging
@@ -143,58 +183,38 @@ export function Home({
           )}
         >
           <SourceCard title="Connect">
-            {CONNECTIONS.map(({ logo, color, name }) => (
+            {CONNECTIONS.map(({ kind, color, name }) => (
               <SourceRow
                 key={name}
                 name={name}
-                onClick={showNotReady}
+                onClick={() =>
+                  projectName ? onConnect(kind) : setNotice(NEEDS_PROJECT)
+                }
                 tile={
                   <span
-                    className="grid size-4.5 shrink-0 place-items-center rounded-sm"
+                    className="grid size-4.5 shrink-0 place-items-center rounded-sm text-white"
                     style={{ backgroundColor: color }}
                   >
-                    <img
-                      src={logo}
-                      alt=""
-                      className="size-3 brightness-0 invert"
-                    />
+                    <DatabaseIcon kind={kind} className="size-3" />
                   </span>
                 }
+              />
+            ))}
+          </SourceCard>
+          <SourceCard title="From the Library">
+            {featured.map((dataset) => (
+              <SourceRow
+                key={dataset.id}
+                name={dataset.title}
+                onClick={() => onOpenDataset(dataset.id)}
+                tile={<IconTile icon={CATEGORY_ICONS[dataset.category]} />}
               />
             ))}
             <SourceRow
-              name="Cloud storage"
-              detail="S3, web link"
-              onClick={showNotReady}
-              tile={
-                <span className="grid size-4.5 shrink-0 place-items-center rounded-sm bg-muted">
-                  <HugeiconsIcon
-                    icon={CloudIcon}
-                    strokeWidth={1.5}
-                    className="size-3"
-                  />
-                </span>
-              }
+              name="Browse the Library"
+              onClick={onOpenLibrary}
+              tile={<IconTile icon={ArrowRight01Icon} />}
             />
-          </SourceCard>
-          <SourceCard title="Sample datasets">
-            {DATASETS.map(({ icon, name, size }) => (
-              <SourceRow
-                key={name}
-                name={name}
-                detail={size}
-                onClick={showNotReady}
-                tile={
-                  <span className="grid size-4.5 shrink-0 place-items-center rounded-sm bg-muted">
-                    <HugeiconsIcon
-                      icon={icon}
-                      strokeWidth={1.5}
-                      className="size-3"
-                    />
-                  </span>
-                }
-              />
-            ))}
           </SourceCard>
         </div>
         <p
