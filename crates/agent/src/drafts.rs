@@ -30,10 +30,62 @@ fn is_identifier(name: &str) -> bool {
     lower == "id" || lower.ends_with("_id") || lower.ends_with(" id") || name.ends_with("ID")
 }
 
+// A whole-number column named like a year, such as `Year` or `fiscal_year`.
+fn looks_like_year(column: &ColumnProfile) -> bool {
+    let is_year = |value: &Option<String>| {
+        value
+            .as_deref()
+            .and_then(|value| value.parse::<i64>().ok())
+            .is_some_and(|year| (1000..=2999).contains(&year))
+    };
+    column.kind == ColumnKind::Number
+        && column.name.to_lowercase().contains("year")
+        && is_year(&column.min)
+        && is_year(&column.max)
+}
+
+// Adding up rates, shares or temperatures gives a meaningless total.
+fn is_average_only(column: &ColumnProfile) -> bool {
+    const WORDS: [&str; 15] = [
+        "average",
+        "avg",
+        "mean",
+        "median",
+        "rate",
+        "ratio",
+        "share",
+        "percent",
+        "percentage",
+        "pct",
+        "capita",
+        "expectancy",
+        "index",
+        "temperature",
+        "temp",
+    ];
+    let lower = column.name.to_lowercase();
+    lower.contains('%')
+        || lower
+            .split(|letter: char| !letter.is_alphanumeric())
+            .any(|word| WORDS.contains(&word))
+}
+
+fn total_of(column: &ColumnProfile) -> Aggregate {
+    if is_average_only(column) {
+        Aggregate::Average
+    } else {
+        Aggregate::Sum
+    }
+}
+
 fn measures(profile: &[ColumnProfile]) -> Vec<&ColumnProfile> {
     profile
         .iter()
-        .filter(|column| column.kind == ColumnKind::Number && !is_identifier(&column.name))
+        .filter(|column| {
+            column.kind == ColumnKind::Number
+                && !is_identifier(&column.name)
+                && !looks_like_year(column)
+        })
         .collect()
 }
 
@@ -144,6 +196,7 @@ fn timeline(profile: &[ColumnProfile]) -> Option<&ColumnProfile> {
         .iter()
         .find(|column| column.kind == ColumnKind::Date)
         .or_else(|| profile.iter().find(|column| looks_like_period(column)))
+        .or_else(|| profile.iter().find(|column| looks_like_year(column)))
 }
 
 // The main table is the biggest one with something to add up.
@@ -239,7 +292,7 @@ fn numbers(page: &mut Page, drafter: &mut Drafter, profile: &[ColumnProfile]) {
         }
         spec
     };
-    if let Some(measure) = measure {
+    if let Some(measure) = measure.filter(|measure| !is_average_only(measure)) {
         let spec = with_trend(drafter.spec(Aggregate::Sum, Some(&measure.name)));
         let block = drafter.figure(&format!("Total {}", measure.name), "number", &spec);
         place_block(page, block);
@@ -256,7 +309,7 @@ fn numbers(page: &mut Page, drafter: &mut Drafter, profile: &[ColumnProfile]) {
 
 fn value_spec(drafter: &Drafter, profile: &[ColumnProfile]) -> QuerySpec {
     match measures(profile).first() {
-        Some(measure) => drafter.spec(Aggregate::Sum, Some(&measure.name)),
+        Some(measure) => drafter.spec(total_of(measure), Some(&measure.name)),
         None => drafter.spec(Aggregate::Count, None),
     }
 }
@@ -558,6 +611,44 @@ mod tests {
             .collect();
         assert!(sql.iter().all(|sql| !sql.contains("sum(\"order_id\")")));
         assert!(sql.iter().all(|sql| !sql.contains("sum(\"customer_id\")")));
+    }
+
+    #[test]
+    fn a_year_column_is_a_timeline_and_never_added_up() {
+        let folder = Folder::new();
+        let world = "country,Year,population\nAda,2000,5\nAda,2001,6\nBo,2000,7\n";
+        let page = draft(DraftKind::Overview, &[folder.table("world.csv", world)]);
+
+        assert_eq!(
+            titles(&page)[0],
+            ["Total population", "Rows", "Average population"]
+        );
+        let sql: Vec<&str> = blocks(&page)
+            .filter_map(|block| block.sql.as_deref())
+            .collect();
+        assert!(sql.iter().all(|sql| !sql.contains("sum(\"Year\")")));
+        let line = blocks(&page)
+            .find(|block| block.view.as_deref() == Some("line"))
+            .unwrap();
+        assert_eq!(line.x_column.as_deref(), Some("Year"));
+    }
+
+    #[test]
+    fn a_rate_is_averaged_instead_of_added_up() {
+        let folder = Folder::new();
+        let sales = "region,day,growth_rate\nEMEA,2026-01-05,0.1\nAPAC,2026-02-05,0.3\n";
+        let page = draft(DraftKind::Overview, &[folder.table("sales.csv", sales)]);
+
+        assert_eq!(titles(&page)[0], ["Rows", "Average growth_rate"]);
+        let line = blocks(&page)
+            .find(|block| block.view.as_deref() == Some("line"))
+            .unwrap();
+        assert!(
+            line.sql
+                .as_deref()
+                .unwrap()
+                .contains("avg(\"growth_rate\")")
+        );
     }
 
     #[test]
