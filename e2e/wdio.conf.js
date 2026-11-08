@@ -6,22 +6,25 @@ import { fileURLToPath } from "node:url"
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const IDENTIFIER = "dev.opik.davis"
-const executable = process.platform === "win32" ? "davis.exe" : "davis"
+const isWindows = process.platform === "win32"
+const application = path.resolve(
+  here,
+  "../target/debug",
+  isWindows ? "davis.exe" : "davis"
+)
+const DEBUG_PORT = 9222
+const DRIVER_PORT = 4444
+const START_TIMEOUT_MS = 60000
 
-let tauriDriver
+const children = []
 let isClosing = false
 
 function configFolder() {
-  if (process.platform === "win32") {
+  if (isWindows) {
     return path.join(process.env.APPDATA, IDENTIFIER)
   }
   const base = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), ".config")
   return path.join(base, IDENTIFIER)
-}
-
-// Tauri keeps WebView2 data here, and the Edge driver must look in the same place.
-function webviewFolder() {
-  return path.join(process.env.LOCALAPPDATA, IDENTIFIER, "EBWebView")
 }
 
 // Seeding replaces Davis settings, so it only runs on throwaway CI machines.
@@ -58,26 +61,72 @@ function seedProject() {
   )
 }
 
-function closeTauriDriver() {
-  isClosing = true
-  tauriDriver?.kill()
+function start(command, args, env = process.env) {
+  const child = spawn(command, args, {
+    env,
+    stdio: [null, process.stdout, process.stderr],
+  })
+  child.on("error", (error) => {
+    console.error(`${command} failed to start:`, error)
+    process.exit(1)
+  })
+  child.on("exit", (code) => {
+    if (!isClosing) {
+      console.error(`${command} exited with code`, code)
+      process.exit(1)
+    }
+  })
+  children.push(child)
 }
+
+async function waitForUrl(url) {
+  const deadline = Date.now() + START_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    const isUp = await fetch(url).then(
+      (response) => response.ok,
+      () => false
+    )
+    if (isUp) return
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+  throw new Error(`${url} didn't answer within ${START_TIMEOUT_MS / 1000}s`)
+}
+
+// On Windows, tauri-driver never got a WebView2 session in CI (DevToolsActivePort
+// error), so Davis opens a debugging port and the Edge driver attaches to it.
+async function startDrivers() {
+  if (!isWindows) {
+    start("tauri-driver", [])
+    return
+  }
+  start(application, [], {
+    ...process.env,
+    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${DEBUG_PORT}`,
+  })
+  await waitForUrl(`http://127.0.0.1:${DEBUG_PORT}/json/version`)
+  start("msedgedriver", [`--port=${DRIVER_PORT}`])
+  await waitForUrl(`http://127.0.0.1:${DRIVER_PORT}/status`)
+}
+
+function stopAll() {
+  isClosing = true
+  for (const child of children) child.kill()
+}
+
+const capability = isWindows
+  ? {
+      browserName: "webview2",
+      "ms:edgeOptions": { debuggerAddress: `127.0.0.1:${DEBUG_PORT}` },
+    }
+  : { "tauri:options": { application } }
 
 export const config = {
   host: "127.0.0.1",
-  port: 4444,
+  port: DRIVER_PORT,
   specs: ["./specs/**/*.e2e.js"],
   maxInstances: 1,
   capabilities: [
-    {
-      maxInstances: 1,
-      "tauri:options": {
-        application: path.resolve(here, "../target/debug", executable),
-        ...(process.platform === "win32" && {
-          webviewOptions: { userDataFolder: webviewFolder() },
-        }),
-      },
-    },
+    { maxInstances: 1, "wdio:enforceWebDriverClassic": true, ...capability },
   ],
   reporters: ["spec"],
   framework: "mocha",
@@ -86,21 +135,7 @@ export const config = {
 
   onPrepare: seedProject,
 
-  beforeSession: () => {
-    tauriDriver = spawn("tauri-driver", [], {
-      stdio: [null, process.stdout, process.stderr],
-    })
-    tauriDriver.on("error", (error) => {
-      console.error("tauri-driver failed to start:", error)
-      process.exit(1)
-    })
-    tauriDriver.on("exit", (code) => {
-      if (!isClosing) {
-        console.error("tauri-driver exited with code", code)
-        process.exit(1)
-      }
-    })
-  },
+  beforeSession: startDrivers,
 
   afterTest: async (test, context, { passed }) => {
     if (passed) return
@@ -108,6 +143,6 @@ export const config = {
     await browser.saveScreenshot(path.join(here, "output", `${test.title}.png`))
   },
 
-  afterSession: closeTauriDriver,
-  onComplete: closeTauriDriver,
+  afterSession: stopAll,
+  onComplete: stopAll,
 }

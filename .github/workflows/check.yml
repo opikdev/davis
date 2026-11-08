@@ -34,7 +34,7 @@ jobs:
       - run: pnpm check
       - run: pnpm tauri build --debug
       - name: Install the WebDriver tools
-        if: runner.os != 'macOS'
+        if: runner.os == 'Linux'
         run: cargo install tauri-driver --version 2.1.0 --locked
       - name: Install the Edge driver
         if: runner.os == 'Windows'
@@ -50,9 +50,6 @@ jobs:
       - name: Run the app end to end
         if: runner.os == 'Windows'
         run: pnpm --dir e2e test
-      - name: Show WebView2 data
-        if: failure() && runner.os == 'Windows'
-        run: Get-ChildItem "$env:LOCALAPPDATA\dev.opik.davis" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
       - uses: actions/upload-artifact@v4
         if: failure() && runner.os != 'macOS'
         with:

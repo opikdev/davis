@@ -31,7 +31,7 @@ To install a release, see [Install Davis](docs/install.md). Releases aren't code
 pnpm check
 ```
 
-This runs type checks, lint, and tests for both TypeScript and Rust. CI also opens the built app on Windows and Linux and runs the tests in `e2e/`. `tauri-driver`, which drives the app, doesn't support macOS, so check Mac changes by hand.
+This runs type checks, lint, and tests for both TypeScript and Rust. CI also opens the built app on Windows and Linux and runs the tests in `e2e/`. There's no WebDriver for the macOS web view, so check Mac changes by hand.
 
 ## Build
 

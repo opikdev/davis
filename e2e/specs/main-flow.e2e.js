@@ -17,6 +17,21 @@ async function waitForText(text, selector = "body") {
   )
 }
 
+// The separator depends on the system locale, so compare digits only.
+async function waitForNumber(digits) {
+  await browser.waitUntil(
+    () =>
+      browser.execute(
+        (digits) =>
+          document.body.textContent
+            .replace(/[\s,.\u00a0\u202f']/g, "")
+            .includes(digits),
+        digits
+      ),
+    { timeoutMsg: `${digits} never showed` }
+  )
+}
+
 describe("Davis", () => {
   it("opens a file from the project", async () => {
     await $('button[title="sales.csv"]').click()
@@ -30,7 +45,7 @@ describe("Davis", () => {
     await button("Overview").click()
 
     await waitForText("Total amount")
-    await waitForText("1,400")
+    await waitForNumber("1400")
     await $(".recharts-surface").waitForDisplayed()
   })
 
