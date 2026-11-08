@@ -428,6 +428,30 @@ fn run_block(tables: &[QueryTable], block: &Block, offline: &[OfflineDatabase]) 
     }
 }
 
+// Each query sets up its own engine, which takes a moment, so the blocks run
+// side by side instead of one after another.
+fn run_blocks(tables: &[QueryTable], page: &Page, offline: &[OfflineDatabase]) -> Vec<BlockResult> {
+    std::thread::scope(|scope| {
+        let runs: Vec<_> = page
+            .rows
+            .iter()
+            .flat_map(|row| &row.blocks)
+            .map(|block| (block, scope.spawn(|| run_block(tables, block, offline))))
+            .collect();
+        runs.into_iter()
+            .map(|(block, run)| {
+                run.join().unwrap_or_else(|_| BlockResult {
+                    id: block.id.clone(),
+                    result: None,
+                    error: Some("Davis couldn't run this block.".to_owned()),
+                    trend: None,
+                    sources: BTreeMap::new(),
+                })
+            })
+            .collect()
+    })
+}
+
 fn latest_date(page: &Page, tables: &[ProjectTable]) -> Option<String> {
     page.filters
         .iter()
@@ -456,12 +480,7 @@ pub async fn run_page(project: String, page: Page) -> Result<PageRun, AppError> 
             .map(|table| QueryTable::new(table.name, table.opened.source))
             .collect();
         let filters = apply_filters(&page, &mut tables, &files);
-        let blocks = page
-            .rows
-            .iter()
-            .flat_map(|row| &row.blocks)
-            .map(|block| run_block(&tables, block, &offline))
-            .collect();
+        let blocks = run_blocks(&tables, &page, &offline);
         Ok(PageRun {
             blocks,
             filters,
