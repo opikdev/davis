@@ -39,6 +39,10 @@ This runs type checks, lint, and tests for both TypeScript and Rust. CI also ope
 pnpm tauri build
 ```
 
+## Privacy and code signing
+
+Davis sends nothing anywhere unless you connect an AI and ask it something. See the [privacy policy](docs/privacy.md) and the [code signing policy](docs/code-signing.md).
+
 ## Docs
 
 - [Install Davis](docs/install.md)

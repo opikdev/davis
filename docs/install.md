@@ -32,6 +32,18 @@ Download the `-setup.exe`, or the `.msi` if your company installs apps that way.
 
 To save API keys, Davis needs a Secret Service keyring, such as GNOME Keyring or KWallet. Claude Code, Codex, and OpenCode sign-in doesn't need one.
 
+## Uninstall
+
+| Your system | Uninstall |
+|---|---|
+| macOS | Drag Davis from Applications to the Trash |
+| Windows | Open **Settings → Apps → Installed apps**, find Davis, and choose **Uninstall** |
+| Ubuntu, Debian | `sudo apt remove davis` |
+| Fedora, openSUSE | `sudo dnf remove davis` |
+| AppImage | Delete the `.AppImage` file |
+
+Uninstalling never deletes your projects in `Documents/Davis`. To remove them and your settings too, see [Remove everything](privacy.md#remove-everything).
+
 ## Why the warnings
 
 macOS and Windows trust an app when its developer pays for a certificate that proves who made it. Davis doesn't have those certificates yet. Each release is built from this repository by the [Release workflow](../.github/workflows/release.yml), so you can check exactly what went into it.

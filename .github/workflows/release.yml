@@ -45,7 +45,7 @@ jobs:
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
           releaseName: ${{ github.ref_type == 'tag' && format('Davis {0}', github.ref_name) || '' }}
-          releaseBody: "Before you open Davis for the first time, read [Install Davis](https://github.com/${{ github.repository }}/blob/main/docs/install.md). These builds aren't code signed yet, so macOS and Windows warn you first."
+          releaseBody: "Before you open Davis for the first time, read [Install Davis](https://github.com/${{ github.repository }}/blob/main/docs/install.md). These builds aren't code signed yet, so macOS and Windows warn you first. See the [code signing policy](https://github.com/${{ github.repository }}/blob/main/docs/code-signing.md) and the [privacy policy](https://github.com/${{ github.repository }}/blob/main/docs/privacy.md)."
           releaseDraft: true
           uploadWorkflowArtifacts: true
           args: ${{ matrix.args }}

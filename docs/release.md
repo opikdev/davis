@@ -19,7 +19,7 @@ Releases aren't code signed. The Mac app is ad-hoc signed, which seals the bundl
 | Platform | Free option | Paid option |
 |---|---|---|
 | macOS | None. Notarization needs an Apple Developer Program membership. | Apple Developer Program, 99 USD a year |
-| Windows | [SignPath Foundation](https://signpath.org/) signs open source projects for free, after a release exists | An OV or EV certificate, or Azure Artifact Signing |
+| Windows | [SignPath Foundation](https://signpath.org/) signs open source projects for free, after a release exists. See the [code signing policy](code-signing.md). | An OV or EV certificate, or Azure Artifact Signing |
 | Linux | No signing needed | — |
 
 Homebrew stopped accepting casks that fail Gatekeeper on 1 September 2026, so Davis can't be in Homebrew until the Mac app is notarized.
