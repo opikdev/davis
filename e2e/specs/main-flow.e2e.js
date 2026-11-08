@@ -32,6 +32,20 @@ async function waitForNumber(digits) {
   )
 }
 
+// Charts redraw as they settle, so a found mark can vanish before the click.
+// Only that error is retried: a second click on a bar would clear its filter.
+async function clickWhenSettled(selector) {
+  await browser.waitUntil(async () => {
+    try {
+      await $(selector).click()
+      return true
+    } catch (error) {
+      if (String(error).includes("stale element")) return false
+      throw error
+    }
+  })
+}
+
 describe("Davis", () => {
   it("opens a file from the project", async () => {
     await $('button[title="sales.csv"]').click()
@@ -50,7 +64,7 @@ describe("Davis", () => {
   })
 
   it("filters the Page by a clicked bar, and clears it", async () => {
-    await $(".recharts-bar-rectangle").click()
+    await clickWhenSettled(".recharts-bar-rectangle")
 
     const chip = $('[aria-label="Clear region APAC"]')
     await chip.waitForDisplayed()
