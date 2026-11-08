@@ -555,7 +555,7 @@ mod tests {
 
     #[test]
     fn a_query_reaches_only_the_files_it_was_given() {
-        let folder = Folder::new("reach");
+        let folder = Folder::new("given");
         let tables = [table(&folder, "orders", "amount\n1\n")];
         let private = folder.write("private.csv", "secret\nCANARY\n");
 
