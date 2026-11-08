@@ -1,5 +1,12 @@
 [workspace]
-members = ["crates/agent", "crates/ai", "crates/core", "crates/project", "src-tauri"]
+members = [
+    "crates/agent",
+    "crates/ai",
+    "crates/core",
+    "crates/library",
+    "crates/project",
+    "src-tauri",
+]
 resolver = "3"
 
 [workspace.package]

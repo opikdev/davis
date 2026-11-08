@@ -43,7 +43,7 @@ fn identifier(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
 
-fn describe(connection: &Connection, from: &str) -> Result<Vec<(String, String)>> {
+pub(crate) fn describe(connection: &Connection, from: &str) -> Result<Vec<(String, String)>> {
     let mut statement = connection.prepare(&format!(
         "SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM {from})"
     ))?;

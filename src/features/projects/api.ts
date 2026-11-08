@@ -21,11 +21,24 @@ export type PageSummary = {
   updatedAt: number
 }
 
+export type DataSource = {
+  dataset: string
+  title: string
+  publisher: string
+  license: string
+  licenseUrl: string
+  credit: string
+  sourceUrl: string
+  files: string[]
+  addedAt: number
+}
+
 export type Project = {
   path: string
   name: string
   files: ProjectFile[]
   connections: DatabaseConnection[]
+  sources: DataSource[]
   chats: ChatSummary[]
   pages: PageSummary[]
 }

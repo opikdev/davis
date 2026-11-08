@@ -1,0 +1,20 @@
+name: Library links
+
+# Publishers move their files, so this finds a broken download before people do.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - crates/library/catalog.json
+
+permissions:
+  contents: read
+
+jobs:
+  links:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: .github/scripts/check-library-links.sh

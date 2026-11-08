@@ -66,6 +66,7 @@ type PageViewProps = {
   pages: ReturnType<typeof usePage>
   hasData: boolean
   isLocked: boolean
+  credits: string[]
   onReconnect: (connectionId: string) => void
 }
 
@@ -74,6 +75,7 @@ export function PageView({
   pages,
   hasData,
   isLocked,
+  credits,
   onReconnect,
 }: PageViewProps) {
   const { page, results, reach, error, isEditing, selectedId, clicked } = pages
@@ -386,6 +388,7 @@ export function PageView({
           results={results}
           clicked={clicked}
           through={through}
+          credits={credits}
           format={exporting}
           onSaved={(path) => {
             setExporting(undefined)

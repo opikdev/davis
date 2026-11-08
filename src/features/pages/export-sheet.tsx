@@ -37,6 +37,7 @@ type ExportSheetProps = {
   results: Record<string, BlockResult>
   clicked: PageFilter[]
   through?: string
+  credits: string[]
   format: ExportFormat
   onSaved: (path: string | null) => void
   onFailed: (message: string) => void
@@ -48,6 +49,7 @@ export function ExportSheet({
   results,
   clicked,
   through,
+  credits,
   format,
   onSaved,
   onFailed,
@@ -107,6 +109,11 @@ export function ExportSheet({
           )}
         </div>
         <PageGrid page={page} results={results} isEditing={false} isExporting />
+        {credits.length > 0 && (
+          <p className="px-3 text-xs text-muted-foreground">
+            Data: {credits.join(" ")}
+          </p>
+        )}
       </div>
     </div>,
     document.body

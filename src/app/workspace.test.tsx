@@ -39,11 +39,13 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: chooseFile }))
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ setFullscreen }),
 }))
+const capturedSheets: string[] = []
 vi.mock("@/features/pages/export", async (original) => ({
   ...(await original<typeof import("@/features/pages/export")>()),
-  captureSheet: () => [
-    { data: "data:image/png;base64,aGk=", width: 1, height: 1 },
-  ],
+  captureSheet: (sheet: HTMLElement) => {
+    capturedSheets.push(sheet.textContent ?? "")
+    return [{ data: "data:image/png;base64,aGk=", width: 1, height: 1 }]
+  },
 }))
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({ writeText }))
 
@@ -125,6 +127,7 @@ type Backend = {
   commands?: string[]
   database?: (command: string, payload: Record<string, unknown>) => unknown
   offline?: () => unknown[]
+  library?: (command: string, payload: Record<string, unknown>) => unknown
 }
 
 type ConnectionFixture = {
@@ -144,6 +147,7 @@ type ProjectFixture = {
   name: string
   files: { name: string; path: string; sizeBytes: number }[]
   connections: ConnectionFixture[]
+  sources: { dataset: string; credit: string; license: string }[]
   chats: { id: string; title: string; updatedAt: number }[]
   pages: { id: string; title: string; updatedAt: number }[]
 }
@@ -288,6 +292,7 @@ function renderWorkspace({
   commands,
   database,
   offline,
+  library,
 }: Backend = {}) {
   let current = existing
   const savedPages = new Map(pages.map((page) => [page.id, page]))
@@ -297,6 +302,9 @@ function renderWorkspace({
     const payload = args as Record<string, unknown>
     commands?.push(command)
     if (DATABASE_COMMANDS.includes(command)) return database?.(command, payload)
+    if (command === "library_datasets" || command === "import_dataset") {
+      return library?.(command, payload)
+    }
     if (command === "save_page") {
       const page = payload.page as PageFixture
       savedPages.set(page.id, page)
@@ -392,6 +400,7 @@ function renderWorkspace({
         name,
         files: [],
         connections: [],
+        sources: [],
         chats: [],
         pages: [],
       }
@@ -410,6 +419,7 @@ function renderWorkspace({
         name,
         files,
         connections: [],
+        sources: [],
         chats: current?.chats ?? [],
         pages: current?.pages ?? [],
       }
@@ -921,6 +931,7 @@ const SAVED_PROJECT = {
     { name: "sales.csv", path: "/data/sales.csv", sizeBytes: 4 },
   ],
   connections: [] as ConnectionFixture[],
+  sources: [] as ProjectFixture["sources"],
   chats: [{ id: "chat-1", title: "Sales by region", updatedAt: 5 }],
   pages: [],
 }
@@ -1670,6 +1681,34 @@ test("exporting draws a sheet and saves what it captured", async () => {
     await screen.findByRole("button", { name: "Saved. Show file" })
   ).toBeTruthy()
   expect(screen.queryByTestId("export-sheet")).toBeNull()
+})
+
+test("an exported Page credits the datasets it came from", async () => {
+  capturedSheets.length = 0
+  const project: ProjectFixture = {
+    ...structuredClone(SAVED_PROJECT),
+    pages: [{ id: "page-1", title: "Overview", updatedAt: 1 }],
+    sources: [
+      {
+        dataset: "world-development",
+        credit: "Our World in Data.",
+        license: "CC BY 4.0",
+      },
+    ],
+  }
+  renderWorkspace(pageBackend({ project, onExport: vi.fn() }))
+  await openOverview()
+
+  await userEvent.click(screen.getByRole("button", { name: "Export" }))
+  await userEvent.click(
+    await screen.findByRole("menuitem", { name: "PNG image" })
+  )
+
+  await waitFor(() =>
+    expect(capturedSheets.join()).toContain(
+      "Data: Our World in Data. CC BY 4.0."
+    )
+  )
 })
 
 test("a Page with a date filter says how recent its data is", async () => {
@@ -2813,4 +2852,165 @@ test("a MySQL database uses its own port and its own download", async () => {
   expect(
     calls.find(([command]) => command === "test_database")?.[1]
   ).toMatchObject({ login: { kind: "mysql", port: 3306 } })
+})
+
+const WORLD = {
+  id: "world-development",
+  title: "World development",
+  category: "world",
+  summary: "Income, population and life expectancy for every country.",
+  covers: "1950 to now",
+  publisher: "Our World in Data",
+  sourceUrl: "https://ourworldindata.org",
+  license: { name: "CC BY 4.0", url: "https://creativecommons.org" },
+  credit: "Our World in Data.",
+  sizeBytes: 2651770,
+  isFeatured: true,
+  isLive: false,
+  isAdvanced: false,
+  questions: ["Do richer countries live longer?", "Q2", "Q3"],
+}
+
+const FLIGHTS = {
+  ...WORLD,
+  id: "us-flights",
+  title: "US flight delays",
+  category: "transport",
+  summary: "Every US domestic flight in one month.",
+  publisher: "US Bureau of Transportation Statistics",
+  sizeBytes: 27573265,
+  isFeatured: false,
+}
+
+async function openLibrary() {
+  const nav = screen.getByRole("navigation", { name: "Main" })
+  await userEvent.click(within(nav).getByRole("button", { name: "Library" }))
+  await screen.findByRole("heading", { name: "Library", level: 1 })
+}
+
+test("the library sorts datasets by category and finds them by search", async () => {
+  renderWorkspace(
+    projectBackend({
+      library: (command) =>
+        command === "library_datasets" ? [WORLD, FLIGHTS] : undefined,
+    })
+  )
+  await screen.findByText("Saved answer")
+
+  await openLibrary()
+
+  expect(await screen.findByText("Start here: small and quick")).toBeTruthy()
+  expect(screen.getByRole("heading", { name: "Transport" })).toBeTruthy()
+  expect(screen.getByText(/about 28 MB/)).toBeTruthy()
+  await userEvent.type(screen.getByLabelText("Search the library"), "flight")
+  expect(screen.queryByText("World development")).toBeNull()
+  expect(screen.getByText("US flight delays")).toBeTruthy()
+  await userEvent.clear(screen.getByLabelText("Search the library"))
+  await userEvent.click(screen.getByRole("button", { name: "World" }))
+  expect(screen.queryByText("US flight delays")).toBeNull()
+})
+
+test("adding a dataset shows its progress, then opens its starting Page", async () => {
+  const project: ProjectFixture = structuredClone(SAVED_PROJECT)
+  let finish: () => void = () => {}
+  const imports: unknown[] = []
+  renderWorkspace(
+    pageBackend({
+      project,
+      library: (command, payload) => {
+        if (command === "library_datasets") return [WORLD]
+        imports.push({ project: payload.project, id: payload.id })
+        const { onProgress } = payload as {
+          onProgress: { onmessage: (progress: unknown) => void }
+        }
+        onProgress.onmessage({
+          label: "Downloading from Our World in Data",
+          received: 50,
+          total: 100,
+        })
+        return new Promise((resolve) => {
+          finish = () => {
+            project.pages = [{ id: "page-1", title: "Overview", updatedAt: 1 }]
+            project.sources = [
+              { dataset: WORLD.id, credit: WORLD.credit, license: "CC BY 4.0" },
+            ]
+            resolve({ project: { ...project }, files: [], pageId: "page-1" })
+          }
+        })
+      },
+    })
+  )
+  await screen.findByText("Saved answer")
+
+  await openLibrary()
+  await userEvent.click(await screen.findByText("World development"))
+  expect(screen.getByText(/Do richer countries live longer/)).toBeTruthy()
+  await userEvent.click(screen.getByRole("button", { name: "Add to Q3" }))
+
+  expect(
+    await screen.findByText("Downloading from Our World in Data · 50%")
+  ).toBeTruthy()
+  expect(imports).toEqual([{ project: "/docs/Q3", id: "world-development" }])
+  finish()
+  expect(
+    await screen.findByRole("heading", { name: "Overview", level: 1 })
+  ).toBeTruthy()
+  expect(await screen.findByText("That query failed.")).toBeTruthy()
+})
+
+test("a dataset that couldn't download says why and can be tried again", async () => {
+  renderWorkspace(
+    projectBackend({
+      library: (command) => {
+        if (command === "library_datasets") return [WORLD]
+        throw {
+          kind: "dataset-download",
+          message:
+            "Couldn't download from Our World in Data. Check that you're online and try again.",
+        }
+      },
+    })
+  )
+  await screen.findByText("Saved answer")
+
+  await openLibrary()
+  await userEvent.click(await screen.findByText("World development"))
+  await userEvent.click(
+    screen.getByRole("button", { name: "Download to a new project" })
+  )
+
+  expect(
+    await screen.findByText(/Couldn't download from Our World in Data/)
+  ).toBeTruthy()
+  expect(
+    screen.getByRole("button", { name: "Download to a new project" })
+  ).toBeTruthy()
+})
+
+test("downloading into a new project opens its starting Page with results", async () => {
+  const project: ProjectFixture = structuredClone(SAVED_PROJECT)
+  renderWorkspace(
+    pageBackend({
+      project,
+      library: (command) => {
+        if (command === "library_datasets") return [WORLD]
+        project.path = "/docs/World development"
+        project.name = "World development"
+        project.pages = [{ id: "page-1", title: "Overview", updatedAt: 1 }]
+        return { project: { ...project }, files: [], pageId: "page-1" }
+      },
+    })
+  )
+  await screen.findByText("Saved answer")
+
+  await openLibrary()
+  await userEvent.click(await screen.findByText("World development"))
+  await userEvent.click(
+    screen.getByRole("button", { name: "Download to a new project" })
+  )
+
+  expect(
+    await screen.findByRole("heading", { name: "Overview", level: 1 })
+  ).toBeTruthy()
+  expect(await screen.findByText("That query failed.")).toBeTruthy()
 })

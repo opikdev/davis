@@ -42,6 +42,8 @@ pub fn run() {
             commands::engine::profile_table,
             commands::engine::read_rows,
             commands::export::export_page,
+            commands::library::import_dataset,
+            commands::library::library_datasets,
             commands::project::add_block,
             commands::project::check_replacement,
             commands::project::replace_project_file,

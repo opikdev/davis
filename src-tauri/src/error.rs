@@ -9,6 +9,8 @@ pub enum AppError {
     #[error(transparent)]
     Engine(#[from] davis_core::Error),
     #[error(transparent)]
+    Library(#[from] davis_library::Error),
+    #[error(transparent)]
     Project(#[from] davis_project::Error),
     #[error("Davis couldn't export this Page: {0}")]
     Export(String),
@@ -22,6 +24,7 @@ impl AppError {
             Self::Agent(error) => error.code(),
             Self::Ai(error) => error.code(),
             Self::Engine(error) => error.code(),
+            Self::Library(error) => error.code(),
             Self::Project(error) => error.code(),
             Self::Export(_) => "export",
             Self::Task(_) => "task",

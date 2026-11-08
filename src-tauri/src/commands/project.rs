@@ -18,11 +18,11 @@ use crate::error::AppError;
 const RECENTS_FILE: &str = "recent-projects.json";
 const PROJECTS_FOLDER: &str = "Davis";
 
-fn recents_path(app: &AppHandle) -> Result<PathBuf, AppError> {
+pub(crate) fn recents_path(app: &AppHandle) -> Result<PathBuf, AppError> {
     Ok(app.path().app_config_dir()?.join(RECENTS_FILE))
 }
 
-fn projects_folder(app: &AppHandle) -> Result<PathBuf, AppError> {
+pub(crate) fn projects_folder(app: &AppHandle) -> Result<PathBuf, AppError> {
     Ok(app.path().document_dir()?.join(PROJECTS_FOLDER))
 }
 
@@ -569,34 +569,45 @@ pub async fn draft_page(
     kind: DraftKind,
     updated_at: u64,
 ) -> Result<Page, AppError> {
-    spawn_blocking(move || {
-        let folder = Path::new(&project);
-        let tables = project_tables(folder)?;
-        let sources: Vec<DraftSource> = tables
-            .iter()
-            .filter_map(|table| {
-                Some(DraftSource {
-                    table,
-                    profile: davis_core::profile_table(&table.opened.source).ok()?,
-                })
+    spawn_blocking(move || draft_tables(Path::new(&project), &id, kind, updated_at, None)).await?
+}
+
+// `only` limits the draft to some files, such as a dataset just downloaded
+// into a project that already had others.
+pub(crate) fn draft_tables(
+    folder: &Path,
+    id: &str,
+    kind: DraftKind,
+    updated_at: u64,
+    only: Option<&[String]>,
+) -> Result<Page, AppError> {
+    let tables: Vec<ProjectTable> = project_tables(folder)?
+        .into_iter()
+        .filter(|table| only.is_none_or(|names| names.contains(&table.opened.name)))
+        .collect();
+    let sources: Vec<DraftSource> = tables
+        .iter()
+        .filter_map(|table| {
+            Some(DraftSource {
+                table,
+                profile: davis_core::profile_table(&table.opened.source).ok()?,
             })
-            .collect();
-        let query_tables: Vec<QueryTable> = tables
-            .iter()
-            .map(|table| QueryTable::new(table.name.clone(), table.opened.source.clone()))
-            .collect();
-        let links = davis_core::find_links(&query_tables)?;
-        Ok(davis_project::change_page(
-            folder,
-            &id,
-            updated_at,
-            |page| {
-                let prefix = format!("b{updated_at}");
-                davis_agent::draft_page(page, kind, &sources, &links, &prefix);
-            },
-        )?)
-    })
-    .await?
+        })
+        .collect();
+    let query_tables: Vec<QueryTable> = tables
+        .iter()
+        .map(|table| QueryTable::new(table.name.clone(), table.opened.source.clone()))
+        .collect();
+    let links = davis_core::find_links(&query_tables)?;
+    Ok(davis_project::change_page(
+        folder,
+        id,
+        updated_at,
+        |page| {
+            let prefix = format!("b{updated_at}");
+            davis_agent::draft_page(page, kind, &sources, &links, &prefix);
+        },
+    )?)
 }
 
 #[cfg(test)]

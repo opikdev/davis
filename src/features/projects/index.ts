@@ -6,6 +6,7 @@ export {
   removeProjectFile,
   replaceProjectFile,
   type ChatSummary,
+  type DataSource,
   type PageSummary,
   type Project,
   type ProjectFile,

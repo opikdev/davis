@@ -1153,6 +1153,7 @@ dependencies = [
  "davis-agent",
  "davis-ai",
  "davis-core",
+ "davis-library",
  "davis-project",
  "serde",
  "serde_json",
@@ -1198,6 +1199,20 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "davis-library"
+version = "0.1.0"
+dependencies = [
+ "davis-core",
+ "davis-project",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tiny_http",
+ "zip",
 ]
 
 [[package]]

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::chats::{CHATS_FOLDER, ChatSummary, list_chats};
 use crate::connections::{DatabaseConnection, list_connections};
 use crate::pages::{PAGES_FOLDER, PageSummary, list_pages};
+use crate::sources::{DataSource, list_sources};
 use crate::storage::write_json;
 use crate::workbook::is_workbook;
 use crate::{Error, Result};
@@ -37,6 +38,7 @@ pub struct Project {
     pub name: String,
     pub files: Vec<ProjectFile>,
     pub connections: Vec<DatabaseConnection>,
+    pub sources: Vec<DataSource>,
     pub chats: Vec<ChatSummary>,
     pub pages: Vec<PageSummary>,
 }
@@ -116,6 +118,7 @@ pub fn read_project(folder: &Path) -> Result<Project> {
         name: folder_name(folder),
         files: list_files(folder)?,
         connections: list_connections(folder)?,
+        sources: list_sources(folder)?,
         chats: list_chats(folder)?,
         pages: list_pages(folder)?,
     })
@@ -197,6 +200,20 @@ pub(crate) fn place_file(data: &Path, name: &str, content: &[u8]) -> Result<Proj
     let partial = data.join(format!(".{name}.{}.part", std::process::id()));
     fs::write(&partial, content)?;
     fs::rename(&partial, &target)?;
+    file_details(&target)
+}
+
+// Replacing a file of the same name is how a downloaded dataset refreshes.
+pub fn install_file(project: &Path, source: &Path, name: &str) -> Result<ProjectFile> {
+    let is_plain = Path::new(name)
+        .file_name()
+        .map(|plain| plain.to_string_lossy())
+        == Some(name.into());
+    if !is_plain {
+        return Err(Error::MissingItem);
+    }
+    let target = data_folder(project)?.join(name);
+    fs::rename(source, &target)?;
     file_details(&target)
 }
 

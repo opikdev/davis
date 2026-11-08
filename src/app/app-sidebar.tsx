@@ -1,5 +1,6 @@
 import {
   Add01Icon,
+  Books02Icon,
   Cancel01Icon,
   DashboardSquare01Icon,
   Database01Icon,
@@ -48,10 +49,11 @@ import {
   type ProjectFile,
 } from "@/features/projects"
 
-export type View = "home" | "data" | "page" | "settings"
+export type View = "home" | "library" | "data" | "page" | "settings"
 
 export const VIEW_LABELS: Record<View, string> = {
   home: "Home",
+  library: "Library",
   data: "Data",
   page: "Pages",
   settings: "Settings",
@@ -59,6 +61,7 @@ export const VIEW_LABELS: Record<View, string> = {
 
 const MAIN_ITEMS: { view: View; icon: IconSvgElement }[] = [
   { view: "home", icon: Home01Icon },
+  { view: "library", icon: Books02Icon },
 ]
 
 type Removal =

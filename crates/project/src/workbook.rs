@@ -52,7 +52,7 @@ fn sheet_as_csv(sheet: &Range<Data>) -> Option<String> {
     (!csv.is_empty()).then_some(csv)
 }
 
-fn read_sheets(source: &Path) -> Result<Vec<(String, String)>> {
+pub fn workbook_sheets(source: &Path) -> Result<Vec<(String, String)>> {
     let name = folder_name(source);
     let unreadable = || Error::UnreadableWorkbook(name.clone());
     let mut workbook = open_workbook_auto(source).map_err(|_| unreadable())?;
@@ -70,13 +70,13 @@ fn read_sheets(source: &Path) -> Result<Vec<(String, String)>> {
 }
 
 pub fn check_workbook(source: &Path) -> Result<()> {
-    read_sheets(source).map(|_| ())
+    workbook_sheets(source).map(|_| ())
 }
 
 // Each sheet becomes a CSV in the project, so Excel files work like any other
 // table without the engine's large Excel extension.
 pub fn add_workbook(project: &Path, source: &Path) -> Result<Vec<ProjectFile>> {
-    let sheets = read_sheets(source)?;
+    let sheets = workbook_sheets(source)?;
     let file_name = folder_name(source);
     let (stem, _) = split_file_name(&file_name);
     let is_single = sheets.len() == 1;

@@ -6,6 +6,9 @@ flowchart LR
   Commands --> Agent["davis-agent<br/>crates/agent/"]
   Commands --> Project["davis-project<br/>crates/project/"]
   Commands --> Core["davis-core<br/>crates/core/"]
+  Commands --> Library["davis-library<br/>crates/library/"]
+  Library --> Project
+  Library --> Core
   Agent --> Core
   Agent --> AI["davis-ai<br/>crates/ai/"]
   Core --> DuckDB
@@ -26,6 +29,7 @@ Dependencies point one way. The crates know nothing about Tauri or React, so the
 | `crates/core/`            | Queries, profiling, and data logic                                            | Depend on Tauri                          |
 | `crates/ai/`              | Providers, keys, settings, and talking to models with tools                   | Know about data or SQL                   |
 | `crates/agent/`           | The analyst: its tools, its prompt, and what the AI may see                   | Depend on Tauri                          |
+| `crates/library/`         | The dataset catalog and the steps that download and shape each dataset          | Depend on Tauri                          |
 | `crates/project/`         | Project folders, saved chats, Pages and connections, and turning workbooks into tables | Depend on Tauri                          |
 
 ## Why it is built this way
@@ -66,6 +70,12 @@ A project can read Postgres and MySQL tables live, as well as files. `crates/cor
 - **Speed:** each chart and question runs on the database. Row counts for the AI come from Postgres's estimate when it has one.
 - **Offline:** `reachable_tables` in `src-tauri/src/commands/chat.rs` tries each database once per run. One that can't be reached is reported with the run, its blocks say so instead of showing an unknown-table error, and the AI's prompt lists its tables as missing. Its tables keep their names, so the others don't change name while it's away.
 - **Tests:** the live tests in `database.rs` run when `DAVIS_TEST_POSTGRES` and `DAVIS_TEST_MYSQL` point at databases loaded with the files in `crates/core/fixtures/`. CI runs them on Linux.
+
+## Library
+
+`crates/library/catalog.json` lists public datasets as recipes, and `crates/library/src/import.rs` runs a recipe in a staging folder inside the project: download from the publisher, unzip, turn workbook sheets into tables, stack or join files into one Parquet table, then move the finished files into `data/`. Davis never re-hosts data, so nobody but the publisher sees a download. Zip entries are written by file name alone, so an archive can't write outside the staging folder.
+
+Each import records the dataset's license and credit in the project's `sources.json`, and exported Pages print those credits. A dataset opens on a Page drafted from its own files. The weekly `Library links` workflow checks every download link.
 
 ## Pages
 

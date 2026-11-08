@@ -38,6 +38,7 @@ When you connect a Postgres or MySQL database, Davis reads it directly from your
 ## Other connections
 
 - When you add an API key, Davis asks the provider for its list of models, so it can check the key.
+- When you add a dataset from the Library, Davis downloads it directly from the publisher named with it. Nothing goes through anyone else.
 - The first time you connect each type of database, and only if you agree, Davis downloads support for it from DuckDB (`extensions.duckdb.org`).
 - When you click **Install** for Claude Code, Codex, or OpenCode, Davis runs that tool's official install command, which downloads it from its maker.
 

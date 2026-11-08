@@ -17,6 +17,7 @@ base64 = "0.22"
 davis-agent = { path = "../crates/agent" }
 davis-ai = { path = "../crates/ai" }
 davis-core = { path = "../crates/core" }
+davis-library = { path = "../crates/library" }
 davis-project = { path = "../crates/project" }
 serde.workspace = true
 tauri = { version = "2.12.5", features = [] }

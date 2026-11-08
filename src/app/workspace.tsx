@@ -36,6 +36,7 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 import { ModelPicker } from "@/features/ai-setup"
+import { LibraryView, type ImportedDataset } from "@/features/library"
 import {
   ConnectDatabaseDialog,
   openDatabaseTable,
@@ -185,6 +186,9 @@ type CurrentViewProps = {
   isDragging: boolean
   onBrowse: () => void
   onReconnect: (connectionId: string) => void
+  credits: string[]
+  currentProject?: Project
+  onImported: (imported: ImportedDataset) => void
 }
 
 function CurrentView({
@@ -200,8 +204,13 @@ function CurrentView({
   isDragging,
   onBrowse,
   onReconnect,
+  credits,
+  currentProject,
+  onImported,
 }: CurrentViewProps) {
   switch (view) {
+    case "library":
+      return <LibraryView project={currentProject} onImported={onImported} />
     case "home":
       return (
         <Home
@@ -227,6 +236,7 @@ function CurrentView({
           pages={pages}
           hasData={hasData}
           isLocked={isAsking}
+          credits={credits}
           onReconnect={onReconnect}
         />
       ) : (
@@ -298,6 +308,7 @@ export function Workspace() {
   const onPageChanged = useCallback(() => void reloadRef.current(), [])
   const [askedBlockId, setAskedBlockId] = useState<string>()
   const [isConnecting, setIsConnecting] = useState(false)
+  const pendingPage = useRef<string>(undefined)
   const [reconnecting, setReconnecting] = useState<{
     connection: DatabaseConnection
     afterwards: () => void
@@ -486,6 +497,32 @@ export function Workspace() {
   function reportReplaceFailure(failure: unknown) {
     setProjectError(toErrorMessage(failure))
     setView("home")
+  }
+
+  // A new project's Page can only open once the Page hook knows the project.
+  useEffect(() => {
+    const id = pendingPage.current
+    if (!id || !project) return
+    pendingPage.current = undefined
+    void openPageById(id)
+  }, [openPageById, project])
+
+  async function showImported({
+    project: imported,
+    files: added,
+    pageId,
+  }: ImportedDataset) {
+    pendingPage.current = pageId ?? undefined
+    if (imported.path === project?.path) {
+      await refresh(imported.path)
+    } else {
+      clearChat()
+      closePage()
+      await projects.open(imported.path)
+    }
+    const file = imported.files.find(({ name }) => name === added[0])
+    if (file) await files.open(file.path)
+    setView(pageId ? "page" : "data")
   }
 
   function openDatabase(connection: DatabaseConnection, table: ConnectedTable) {
@@ -684,6 +721,13 @@ export function Workspace() {
                   error={projectError}
                   isDragging={isDragging}
                   onBrowse={() => void browse()}
+                  currentProject={project}
+                  credits={(project?.sources ?? []).map(
+                    ({ credit, license }) => `${credit} ${license}.`
+                  )}
+                  onImported={(imported) =>
+                    void showImported(imported).catch(reportReplaceFailure)
+                  }
                   onReconnect={(connectionId) => {
                     const connection = project?.connections.find(
                       ({ id }) => id === connectionId

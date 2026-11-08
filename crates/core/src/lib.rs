@@ -4,6 +4,7 @@ mod engine;
 mod error;
 mod profile;
 mod query;
+mod reshape;
 mod table;
 
 pub use builder::{Aggregate, BuiltQuery, Grain, QuerySpec, build_linked_query, build_query};
@@ -21,6 +22,7 @@ pub use profile::{
 pub use query::{
     FilterRule, LinkedFilter, QueryResult, QueryTable, TableFilter, run_query, table_name,
 };
+pub use reshape::{KeepFrom, join_files, stack_files};
 pub use table::{
     Column, ColumnKind, Encoding, Format, OpenedTable, Repair, Row, RowCount, TableSource,
     open_remote_table, open_table, read_rows,

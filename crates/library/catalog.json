@@ -1,0 +1,359 @@
+[
+  {
+    "id": "online-retail",
+    "title": "Online shop sales",
+    "category": "business",
+    "summary": "Every order line from a UK online gift shop over two years, with products, prices, customers and countries.",
+    "covers": "Dec 2009 to Dec 2011",
+    "publisher": "UCI Machine Learning Repository",
+    "sourceUrl": "https://archive.ics.uci.edu/dataset/502/online+retail+ii",
+    "license": { "name": "CC BY 4.0", "url": "https://creativecommons.org/licenses/by/4.0/" },
+    "credit": "Chen, D. (2012). Online Retail II. UCI Machine Learning Repository.",
+    "sizeBytes": 45622418,
+    "isFeatured": false,
+    "isLive": false,
+    "isAdvanced": false,
+    "questions": [
+      "Which products earn the most each month?",
+      "Which countries buy the most outside the UK?",
+      "How much revenue do returns cancel?"
+    ],
+    "steps": [
+      { "do": "download", "url": "https://archive.ics.uci.edu/static/public/502/online+retail+ii.zip", "saveAs": "online_retail_ii.zip" },
+      { "do": "unzip", "archive": "online_retail_ii.zip", "pattern": "online_retail_II.xlsx" },
+      { "do": "workbook", "file": "online_retail_II.xlsx" },
+      { "do": "stack", "pattern": "online_retail_II-*.csv", "saveAs": "online_retail.parquet" },
+      { "do": "keep", "file": "online_retail.parquet", "name": "online_retail.parquet" }
+    ]
+  },
+  {
+    "id": "world-development",
+    "title": "World development",
+    "category": "world",
+    "summary": "Income, population, life expectancy and internet use for every country, year by year, in one table.",
+    "covers": "1950 to now",
+    "publisher": "Our World in Data",
+    "sourceUrl": "https://ourworldindata.org",
+    "license": { "name": "CC BY 4.0", "url": "https://creativecommons.org/licenses/by/4.0/" },
+    "credit": "Our World in Data, based on Eurostat, OECD, IMF and World Bank; HYDE, Gapminder and UN World Population Prospects; Riley, Zijdeman et al., Human Mortality Database and UN World Population Prospects; and ITU via World Bank.",
+    "sizeBytes": 2651770,
+    "isFeatured": true,
+    "isLive": false,
+    "isAdvanced": false,
+    "questions": [
+      "Do richer countries live longer?",
+      "Which countries got online fastest?",
+      "How has life expectancy changed in Africa since 1950?"
+    ],
+    "steps": [
+      { "do": "download", "url": "https://ourworldindata.org/grapher/gdp-per-capita-worldbank.csv", "saveAs": "gdp.csv" },
+      { "do": "download", "url": "https://ourworldindata.org/grapher/population.csv", "saveAs": "population.csv" },
+      { "do": "download", "url": "https://ourworldindata.org/grapher/life-expectancy.csv", "saveAs": "life_expectancy.csv" },
+      { "do": "download", "url": "https://ourworldindata.org/grapher/share-of-individuals-using-the-internet.csv", "saveAs": "internet.csv" },
+      { "do": "join", "files": ["gdp.csv", "population.csv", "life_expectancy.csv", "internet.csv"], "on": ["Entity", "Code", "Year"], "keepFrom": { "column": "Year", "value": 1950 }, "saveAs": "world_development.parquet" },
+      { "do": "keep", "file": "world_development.parquet", "name": "world_development.parquet" }
+    ]
+  },
+  {
+    "id": "co2-emissions",
+    "title": "CO₂ and greenhouse gas emissions",
+    "category": "climate",
+    "summary": "Emissions by country and year, with sources such as coal, oil and gas, plus per-person and cumulative figures.",
+    "covers": "1750 to now",
+    "publisher": "Our World in Data",
+    "sourceUrl": "https://github.com/owid/co2-data",
+    "license": { "name": "CC BY 4.0", "url": "https://creativecommons.org/licenses/by/4.0/" },
+    "credit": "Our World in Data, based on the Global Carbon Project and Jones et al.",
+    "sizeBytes": 14377942,
+    "isFeatured": false,
+    "isLive": false,
+    "isAdvanced": false,
+    "questions": [
+      "Which countries emit the most CO₂ per person?",
+      "How have China's emissions changed since 1990?",
+      "What share of emissions comes from coal?"
+    ],
+    "steps": [
+      { "do": "download", "url": "https://raw.githubusercontent.com/owid/co2-data/master/owid-co2-data.csv", "saveAs": "co2_emissions.csv" },
+      { "do": "keep", "file": "co2_emissions.csv", "name": "co2_emissions.csv" }
+    ]
+  },
+  {
+    "id": "temperature-anomalies",
+    "title": "Monthly temperature by country",
+    "category": "climate",
+    "summary": "How much warmer or colder each month was than the 1991 to 2020 average, for every country.",
+    "covers": "1940 to now",
+    "publisher": "Our World in Data",
+    "sourceUrl": "https://ourworldindata.org/grapher/monthly-temperature-anomalies",
+    "license": { "name": "CC BY 4.0", "url": "https://creativecommons.org/licenses/by/4.0/" },
+    "credit": "Our World in Data, containing modified Copernicus Climate Change Service information.",
+    "sizeBytes": 7533767,
+    "isFeatured": false,
+    "isLive": false,
+    "isAdvanced": false,
+    "questions": [
+      "Which countries warmed the most since 1980?",
+      "Was last summer the warmest on record here?",
+      "How does warming differ by month?"
+    ],
+    "steps": [
+      { "do": "download", "url": "https://ourworldindata.org/grapher/monthly-temperature-anomalies.csv", "saveAs": "temperature_anomalies.csv" },
+      { "do": "keep", "file": "temperature_anomalies.csv", "name": "temperature_anomalies.csv" }
+    ]
+  },
+  {
+    "id": "beijing-air-quality",
+    "title": "Beijing air quality",
+    "category": "climate",
+    "summary": "Hourly pollution and weather readings from 12 monitoring stations across Beijing.",
+    "covers": "Mar 2013 to Feb 2017",
+    "publisher": "UCI Machine Learning Repository",
+    "sourceUrl": "https://archive.ics.uci.edu/dataset/501/beijing+multi+site+air+quality+data",
+    "license": { "name": "CC BY 4.0", "url": "https://creativecommons.org/licenses/by/4.0/" },
+    "credit": "Chen, S. (2017). Beijing Multi-Site Air Quality. UCI Machine Learning Repository.",
+    "sizeBytes": 8192212,
+    "isFeatured": false,
+    "isLive": false,
+    "isAdvanced": false,
+    "questions": [
+      "Which station has the worst PM2.5?",
+      "Is the air worse in winter?",
+      "What time of day is pollution highest?"
+    ],
+    "steps": [
+      { "do": "download", "url": "https://archive.ics.uci.edu/static/public/501/beijing+multi+site+air+quality+data.zip", "saveAs": "beijing.zip" },
+      { "do": "unzip", "archive": "beijing.zip", "pattern": "PRSA2017_Data_20130301-20170228.zip" },
+      { "do": "unzip", "archive": "PRSA2017_Data_20130301-20170228.zip", "pattern": "PRSA_Data_*.csv" },
+      { "do": "stack", "pattern": "PRSA_Data_*.csv", "saveAs": "beijing_air_quality.parquet" },
+      { "do": "keep", "file": "beijing_air_quality.parquet", "name": "beijing_air_quality.parquet" }
+    ]
+  },
+  {
+    "id": "seattle-weather",
+    "title": "Seattle weather",
+    "category": "climate",
+    "summary": "Daily rain, temperature, wind and weather type in Seattle. Small and quick, good for a first try.",
+    "covers": "2012 to 2015",
+    "publisher": "NOAA, via Vega datasets",
+    "sourceUrl": "https://github.com/vega/vega-datasets",
+    "license": { "name": "Public domain", "url": "https://www.ncei.noaa.gov/" },
+    "credit": "NOAA National Centers for Environmental Information, via the Vega datasets.",
+    "sizeBytes": 48219,
+    "isFeatured": true,
+    "isLive": false,
+    "isAdvanced": false,
+    "questions": [
+      "Which month is the rainiest?",
+      "How many sunny days are there each year?",
+      "Is summer getting warmer?"
+    ],
+    "steps": [
+      { "do": "download", "url": "https://raw.githubusercontent.com/vega/vega-datasets/main/data/seattle-weather.csv", "saveAs": "seattle_weather.csv" },
+      { "do": "keep", "file": "seattle_weather.csv", "name": "seattle_weather.csv" }
+    ]
+  },
+  {
+    "id": "energy-mix",
+    "title": "Energy mix by country",
+    "category": "energy",
+    "summary": "How each country makes its energy and electricity, from coal and gas to solar, wind and nuclear.",
+    "covers": "1900 to now",
+    "publisher": "Our World in Data",
+    "sourceUrl": "https://github.com/owid/energy-data",
+    "license": { "name": "CC BY 4.0", "url": "https://creativecommons.org/licenses/by/4.0/" },
+    "credit": "Our World in Data, based on the Energy Institute Statistical Review of World Energy, Ember and others.",
+    "sizeBytes": 9229369,
+    "isFeatured": false,
+    "isLive": false,
+    "isAdvanced": false,
+    "questions": [
+      "Which countries get the most electricity from solar?",
+      "How fast is wind power growing?",
+      "Which countries still rely most on coal?"
+    ],
+    "steps": [
+      { "do": "download", "url": "https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv", "saveAs": "energy_mix.csv" },
+      { "do": "keep", "file": "energy_mix.csv", "name": "energy_mix.csv" }
+    ]
+  },
+  {
+    "id": "power-plants",
+    "title": "Power plants of the world",
+    "category": "energy",
+    "summary": "About 35,000 power plants with their country, fuel, capacity, location and yearly generation.",
+    "covers": "As of 2021",
+    "publisher": "World Resources Institute",
+    "sourceUrl": "https://datasets.wri.org/dataset/globalpowerplantdatabase",
+    "license": { "name": "CC BY 4.0", "url": "https://creativecommons.org/licenses/by/4.0/" },
+    "credit": "Global Power Plant Database v1.3.0, World Resources Institute.",
+    "sizeBytes": 4178889,
+    "isFeatured": false,
+    "isLive": false,
+    "isAdvanced": false,
+    "questions": [
+      "Which fuels have the most capacity worldwide?",
+      "Which countries have the most solar plants?",
+      "How big is the average nuclear plant?"
+    ],
+    "steps": [
+      { "do": "download", "url": "https://datasets.wri.org/private-admin/dataset/53623dfd-3df6-4f15-a091-67457cdb571f/resource/66bcdacc-3d0e-46ad-9271-a5a76b1853d2/download/globalpowerplantdatabasev130.zip", "saveAs": "power_plants.zip" },
+      { "do": "unzip", "archive": "power_plants.zip", "pattern": "global_power_plant_database.csv" },
+      { "do": "keep", "file": "global_power_plant_database.csv", "name": "power_plants.csv" }
+    ]
+  },
+  {
+    "id": "nyc-taxi",
+    "title": "New York taxi trips",
+    "category": "transport",
+    "summary": "Every yellow taxi trip in New York for one month, about 4 million, with fares, tips and pickup zones. Zone names are in a second file.",
+    "covers": "June 2025",
+    "publisher": "NYC Taxi and Limousine Commission",
+    "sourceUrl": "https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page",
+    "license": { "name": "NYC Open Data terms of use", "url": "https://www.nyc.gov/home/terms-of-use.page" },
+    "credit": "NYC Taxi and Limousine Commission (TLC) Trip Record Data.",
+    "sizeBytes": 73555285,
+    "isFeatured": false,
+    "isLive": false,
+    "isAdvanced": false,
+    "questions": [
+      "Which pickup zones earn the most?",
+      "How do tips change by hour?",
+      "How long is the average airport trip?"
+    ],
+    "steps": [
+      { "do": "download", "url": "https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2025-06.parquet", "saveAs": "taxi_trips.parquet" },
+      { "do": "download", "url": "https://d37ci6vzurychx.cloudfront.net/misc/taxi_zone_lookup.csv", "saveAs": "taxi_zones.csv" },
+      { "do": "keep", "file": "taxi_trips.parquet", "name": "taxi_trips_2025_06.parquet" },
+      { "do": "keep", "file": "taxi_zones.csv", "name": "taxi_zones.csv" }
+    ]
+  },
+  {
+    "id": "us-flights",
+    "title": "US flight delays",
+    "category": "transport",
+    "summary": "Every US domestic flight in one month, about 550,000, with airline, airports, delays and their causes.",
+    "covers": "January 2024",
+    "publisher": "US Bureau of Transportation Statistics",
+    "sourceUrl": "https://www.transtats.bts.gov/",
+    "license": { "name": "Public domain", "url": "https://www.transtats.bts.gov/" },
+    "credit": "U.S. Bureau of Transportation Statistics, Airline On-Time Performance Data.",
+    "sizeBytes": 27573265,
+    "isFeatured": false,
+    "isLive": false,
+    "isAdvanced": false,
+    "questions": [
+      "Which airline is most often late?",
+      "Which airports have the longest delays?",
+      "What causes most delays?"
+    ],
+    "steps": [
+      { "do": "download", "url": "https://transtats.bts.gov/PREZIP/On_Time_Reporting_Carrier_On_Time_Performance_1987_present_2024_1.zip", "saveAs": "flights.zip" },
+      { "do": "unzip", "archive": "flights.zip", "pattern": "*.csv" },
+      { "do": "stack", "pattern": "On_Time_Reporting_*.csv", "saveAs": "us_flights_2024_01.parquet" },
+      { "do": "keep", "file": "us_flights_2024_01.parquet", "name": "us_flights_2024_01.parquet" }
+    ]
+  },
+  {
+    "id": "bike-rentals",
+    "title": "Washington DC bike rentals",
+    "category": "transport",
+    "summary": "Hourly and daily bike-share rentals with the weather and holidays. Small and quick, good for a first try.",
+    "covers": "2011 to 2012",
+    "publisher": "UCI Machine Learning Repository",
+    "sourceUrl": "https://archive.ics.uci.edu/dataset/275/bike+sharing+dataset",
+    "license": { "name": "CC BY 4.0", "url": "https://creativecommons.org/licenses/by/4.0/" },
+    "credit": "Fanaee-T, H. (2013). Bike Sharing. UCI Machine Learning Repository.",
+    "sizeBytes": 279992,
+    "isFeatured": true,
+    "isLive": false,
+    "isAdvanced": false,
+    "questions": [
+      "How does rain change rentals?",
+      "What's the busiest hour on a weekday?",
+      "Did rentals grow from 2011 to 2012?"
+    ],
+    "steps": [
+      { "do": "download", "url": "https://archive.ics.uci.edu/static/public/275/bike+sharing+dataset.zip", "saveAs": "bike.zip" },
+      { "do": "unzip", "archive": "bike.zip", "pattern": "hour.csv" },
+      { "do": "unzip", "archive": "bike.zip", "pattern": "day.csv" },
+      { "do": "keep", "file": "hour.csv", "name": "bike_rentals_hourly.csv" },
+      { "do": "keep", "file": "day.csv", "name": "bike_rentals_daily.csv" }
+    ]
+  },
+  {
+    "id": "earthquakes",
+    "title": "Earthquakes, last 30 days",
+    "category": "nature",
+    "summary": "Every earthquake recorded worldwide in the last 30 days, with magnitude, depth and place. Download again any time for the latest.",
+    "covers": "Last 30 days, live",
+    "publisher": "U.S. Geological Survey",
+    "sourceUrl": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/csv.php",
+    "license": { "name": "Public domain", "url": "https://www.usgs.gov/information-policies-and-instructions/copyrights-and-credits" },
+    "credit": "U.S. Geological Survey Earthquake Hazards Program.",
+    "sizeBytes": 2000000,
+    "isFeatured": true,
+    "isLive": true,
+    "isAdvanced": false,
+    "questions": [
+      "Where were the strongest earthquakes this month?",
+      "How many earthquakes happen each day?",
+      "Are deeper earthquakes stronger?"
+    ],
+    "steps": [
+      { "do": "download", "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_month.csv", "saveAs": "earthquakes.csv" },
+      { "do": "keep", "file": "earthquakes.csv", "name": "earthquakes_last_30_days.csv" }
+    ]
+  },
+  {
+    "id": "developer-survey",
+    "title": "Stack Overflow Developer Survey",
+    "category": "technology",
+    "summary": "About 49,000 developers' answers on pay, languages, tools, remote work and AI. Many answers are lists, which suit questions more than charts.",
+    "covers": "2025",
+    "publisher": "Stack Overflow",
+    "sourceUrl": "https://survey.stackoverflow.co/",
+    "license": { "name": "ODbL 1.0", "url": "https://opendatacommons.org/licenses/odbl/1-0/" },
+    "credit": "Stack Overflow Developer Survey 2025, Stack Exchange Inc.",
+    "sizeBytes": 140923648,
+    "isFeatured": false,
+    "isLive": false,
+    "isAdvanced": true,
+    "questions": [
+      "How does pay change with years of experience?",
+      "Which languages do developers want to learn?",
+      "How many developers use AI tools every day?"
+    ],
+    "steps": [
+      { "do": "download", "url": "https://media.githubusercontent.com/media/StackExchange/Survey/main/packages/archive/2025/results.csv", "saveAs": "survey_results.csv" },
+      { "do": "download", "url": "https://media.githubusercontent.com/media/StackExchange/Survey/main/packages/archive/2025/schema.csv", "saveAs": "survey_questions.csv" },
+      { "do": "stack", "pattern": "survey_results.csv", "saveAs": "developer_survey_2025.parquet" },
+      { "do": "keep", "file": "developer_survey_2025.parquet", "name": "developer_survey_2025.parquet" },
+      { "do": "keep", "file": "survey_questions.csv", "name": "developer_survey_questions.csv" }
+    ]
+  },
+  {
+    "id": "nba-games",
+    "title": "NBA games and team ratings",
+    "category": "sports",
+    "summary": "Every NBA game from 1946 to 2015 with scores and each team's Elo rating before and after. Historical: it isn't updated anymore.",
+    "covers": "1946 to 2015",
+    "publisher": "FiveThirtyEight",
+    "sourceUrl": "https://github.com/fivethirtyeight/data/tree/master/nba-elo",
+    "license": { "name": "CC BY 4.0", "url": "https://creativecommons.org/licenses/by/4.0/" },
+    "credit": "FiveThirtyEight, NBA Elo ratings.",
+    "sizeBytes": 18173265,
+    "isFeatured": false,
+    "isLive": false,
+    "isAdvanced": false,
+    "questions": [
+      "Which team had the highest rating ever?",
+      "How much is home court worth?",
+      "Which seasons had the biggest upsets?"
+    ],
+    "steps": [
+      { "do": "download", "url": "https://raw.githubusercontent.com/fivethirtyeight/data/master/nba-elo/nbaallelo.csv", "saveAs": "nba_games.csv" },
+      { "do": "keep", "file": "nba_games.csv", "name": "nba_games.csv" }
+    ]
+  }
+]
