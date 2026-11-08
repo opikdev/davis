@@ -7,9 +7,9 @@ Download Davis from the [Releases page](https://github.com/opikdev/davis/release
 Download the `.dmg`. It runs on Apple silicon and Intel Macs.
 
 1. Open the `.dmg` and drag Davis to Applications.
-2. Open Davis. macOS says it can't check Davis for malicious software. Click **Done**.
+2. Open Davis. macOS shows "Davis" Not Opened and says Apple could not verify it. Click **Done**, not **Move to Trash**.
 3. Open **System Settings**, go to **Privacy & Security**, and scroll down to **Security**.
-4. Next to the message about Davis, click **Open Anyway**, then enter your password.
+4. Next to the message about Davis, click **Open Anyway**. Click **Open Anyway** again to confirm, then enter your password.
 
 On macOS 14 or earlier, you can instead Control-click Davis in Applications, choose **Open**, then click **Open** again.
 
