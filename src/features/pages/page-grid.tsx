@@ -10,7 +10,12 @@ import {
 } from "@dnd-kit/core"
 import { useState } from "react"
 
-import type { Block, BlockResult, Grain, Page } from "@/features/pages/api"
+import type {
+  Block,
+  BlockResult,
+  Page,
+  ValueSelector,
+} from "@/features/pages/api"
 import { BlockView } from "@/features/pages/block-view"
 import { MAX_BLOCKS_IN_ROW, type DropTarget } from "@/features/pages/layout"
 import { cn } from "@/lib/utils"
@@ -120,7 +125,7 @@ type PageGridProps = {
   onSelect?: (id: string) => void
   onRemove?: (id: string) => void
   onTextChange?: (id: string, text: string) => void
-  onSelectValue?: (column: string, value: string, grain?: Grain) => void
+  selectorFor?: (column: string) => ValueSelector | undefined
 }
 
 export function PageGrid({
@@ -133,7 +138,7 @@ export function PageGrid({
   onSelect,
   onRemove,
   onTextChange,
-  onSelectValue,
+  selectorFor,
 }: PageGridProps) {
   const [isDragging, setIsDragging] = useState(false)
   const sensors = useSensors(
@@ -157,7 +162,7 @@ export function PageGrid({
     onSelect: () => onSelect?.(block.id),
     onRemove: () => onRemove?.(block.id),
     onTextChange: (text: string) => onTextChange?.(block.id, text),
-    onSelectValue,
+    selectorFor,
   })
 
   return (

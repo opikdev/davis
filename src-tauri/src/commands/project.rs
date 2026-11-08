@@ -537,12 +537,18 @@ pub async fn draft_page(
                 })
             })
             .collect();
+        let query_tables: Vec<QueryTable> = tables
+            .iter()
+            .map(|table| QueryTable::new(table.name.clone(), table.opened.source.clone()))
+            .collect();
+        let links = davis_core::find_links(&query_tables)?;
         Ok(davis_project::change_page(
             folder,
             &id,
             updated_at,
             |page| {
-                davis_agent::draft_page(page, kind, &sources, &format!("b{updated_at}"));
+                let prefix = format!("b{updated_at}");
+                davis_agent::draft_page(page, kind, &sources, &links, &prefix);
             },
         )?)
     })

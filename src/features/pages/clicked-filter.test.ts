@@ -1,7 +1,7 @@
 import { expect, test } from "vitest"
 
 import type { ProjectColumns } from "@/features/pages/api"
-import { clickedFilter } from "@/features/pages/clicked-filter"
+import { clickedFilter, isFileColumn } from "@/features/pages/clicked-filter"
 
 const TABLES: ProjectColumns[] = [
   {
@@ -45,4 +45,18 @@ test("a date label Davis can't read as a period is left alone", () => {
 
 test("a column in no file is left alone", () => {
   expect(clickedFilter(TABLES, "total", "5")).toBeUndefined()
+})
+
+test("only a column some file has can be clicked to filter", () => {
+  const linked: ProjectColumns[] = [
+    ...TABLES,
+    {
+      table: "customers.csv",
+      columns: [{ name: "segment", dataType: "VARCHAR", kind: "text" }],
+    },
+  ]
+
+  expect(isFileColumn(linked, "region")).toBe(true)
+  expect(isFileColumn(linked, "segment")).toBe(true)
+  expect(isFileColumn(linked, "order_month")).toBe(false)
 })

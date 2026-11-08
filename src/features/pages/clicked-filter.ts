@@ -22,6 +22,14 @@ function periodRange(label: string, grain: Grain | null | undefined) {
     : undefined
 }
 
+// An AI chart can label its axis with a name no file has, and a click there
+// would filter nothing.
+export function isFileColumn(tables: ProjectColumns[], column: string) {
+  return tables.some(({ columns }) =>
+    columns.some(({ name }) => name === column)
+  )
+}
+
 export function clickedFilter(
   tables: ProjectColumns[],
   column: string,

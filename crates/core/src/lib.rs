@@ -5,7 +5,7 @@ mod profile;
 mod query;
 mod table;
 
-pub use builder::{Aggregate, BuiltQuery, Grain, QuerySpec, build_query};
+pub use builder::{Aggregate, BuiltQuery, Grain, QuerySpec, build_linked_query, build_query};
 pub use engine::{EngineInfo, engine_info};
 pub use error::{Error, Result};
 pub use profile::{

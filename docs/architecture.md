@@ -61,13 +61,13 @@ A Page block stores its query, not its numbers, so opening a Page always shows t
 
 A Page is a list of rows, and each row holds up to four blocks that share its width. Rows replaced a free grid because they can't overlap, leave gaps, or break when the panel changes width. Pages saved in the old grid format are converted when read.
 
-A block built from choices keeps those choices in `spec`, and `crates/core/src/builder.rs` turns them into SQL, so nobody needs the AI or SQL to make a chart. Blocks the AI wrote have no `spec`, so the settings panel never replaces their SQL unless the person asks. Starting points in `crates/agent/src/drafts.rs` draft a Page from each file's profile without using AI.
+A block built from choices keeps those choices in `spec`, and `crates/core/src/builder.rs` turns them into SQL, so nobody needs the AI or SQL to make a chart. Blocks the AI wrote have no `spec`, so the settings panel never replaces their SQL unless the person asks. Starting points in `crates/agent/src/drafts.rs` draft a Page from each file's profile without using AI. They skip columns where one value covers 90% of rows. When the main file has nothing to group by, they look the group up in a linked file, and that block has no `spec`, because choices can't name a column from another file.
 
 Export draws the Page on a fixed-width light sheet that stays out of view, so the result doesn't depend on the window size or theme. `modern-screenshot` captures it, and pages break between rows. Rust asks where to save, so the webview can never choose a path to write to. PDFs hold images of the sheet, so their text can't be selected. Inter is bundled into the export code because WKWebView refuses to fetch app assets under the CSP.
 
 Replacing a file keeps its name, so every Page and chat built on it keeps working. Davis lists the columns the new file is missing before replacing it.
 
-A Page opens in View, where clicking a chart adds a temporary filter that isn't saved. Changes happen in Edit, which has undo. Asking the AI about a block sends its id with the question, and the AI changes that block in place.
+A Page opens in View, where clicking a chart adds a temporary filter that isn't saved. Only charts whose labels come from a real file column can be clicked. Changes happen in Edit, which has undo. Asking the AI about a block sends its id with the question, and the AI changes that block in place.
 
 Filters narrow the tables themselves, not a block's result, because filtering an aggregate afterwards gives wrong numbers. A filter also follows links found by `find_links`, so a filter on `customers` reaches a total worked out from `orders` alone. Each filter shows which files it reached, because a block that a filter can't reach keeps showing unfiltered numbers.
 

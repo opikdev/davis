@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::TableLink;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Aggregate {
@@ -90,7 +92,28 @@ fn period(column: &str, grain: Option<Grain>) -> String {
 // Column names are quoted here and tables come from the project, and every
 // query still passes the same read-only check as one the AI writes.
 pub fn build_query(spec: &QuerySpec, table: &str) -> BuiltQuery {
-    let from = name(table);
+    build_from(spec, &name(table))
+}
+
+// The breakdown column lives in a linked file. A link matches at most one row,
+// so looking the column up never repeats or drops a row.
+pub fn build_linked_query(spec: &QuerySpec, link: &TableLink) -> BuiltQuery {
+    let Some(by) = &spec.by else {
+        return build_query(spec, &link.from_table);
+    };
+    let from = format!(
+        "(SELECT main.*, linked.{} FROM {} AS main LEFT JOIN {} AS linked \
+         ON main.{}::VARCHAR = linked.{}::VARCHAR)",
+        name(by),
+        name(&link.from_table),
+        name(&link.to_table),
+        name(&link.from_column),
+        name(&link.to_column)
+    );
+    build_from(spec, &from)
+}
+
+fn build_from(spec: &QuerySpec, from: &str) -> BuiltQuery {
     let measure = measure_sql(spec);
     let label = measure_label(spec);
     let alias = name(&label);

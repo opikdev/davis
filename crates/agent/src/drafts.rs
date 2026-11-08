@@ -1,4 +1,7 @@
-use davis_core::{Aggregate, ColumnKind, ColumnProfile, Grain, QuerySpec, build_query};
+use davis_core::{
+    Aggregate, BuiltQuery, ColumnKind, ColumnProfile, Grain, QuerySpec, TableLink,
+    build_linked_query, build_query, column_values,
+};
 use davis_project::{Block, BlockKind, FilterKind, Page, PageFilter, place_block};
 use serde::Deserialize;
 
@@ -6,6 +9,7 @@ use crate::prompt::ProjectTable;
 
 const MAX_GROUPS: u64 = 30;
 const MAX_DRAFT_GROUPS: usize = 3;
+const MAX_COMMON_SHARE: f64 = 0.9;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -43,6 +47,63 @@ fn groups(profile: &[ColumnProfile]) -> Vec<&ColumnProfile> {
                 && !looks_like_period(column)
         })
         .collect()
+}
+
+// When nearly every row has the same value, the column says little as a
+// breakdown or a filter. A failed count keeps the column.
+fn is_lopsided(source: &DraftSource, column: &ColumnProfile) -> bool {
+    let present = source.table.opened.row_count as f64 * (1.0 - column.missing_percent / 100.0);
+    column_values(&source.table.opened.source, &column.name, column.kind)
+        .ok()
+        .and_then(|counts| counts.first().map(|top| top.count as f64))
+        .is_some_and(|top| present > 0.0 && top / present >= MAX_COMMON_SHARE)
+}
+
+fn useful_groups<'a>(source: &'a DraftSource) -> Vec<&'a ColumnProfile> {
+    groups(&source.profile)
+        .into_iter()
+        .filter(|column| !is_lopsided(source, column))
+        .collect()
+}
+
+struct Breakdown<'a> {
+    column: &'a ColumnProfile,
+    link: Option<&'a TableLink>,
+}
+
+// The main file's own groups come first, then groups looked up in linked files.
+fn breakdowns<'a>(
+    main: &'a DraftSource,
+    sources: &'a [DraftSource],
+    links: &'a [TableLink],
+) -> Vec<Breakdown<'a>> {
+    let mut found: Vec<Breakdown> = useful_groups(main)
+        .into_iter()
+        .map(|column| Breakdown { column, link: None })
+        .collect();
+    for link in links
+        .iter()
+        .filter(|link| link.from_table == main.table.name)
+    {
+        let Some(linked) = sources
+            .iter()
+            .find(|source| source.table.name == link.to_table)
+        else {
+            continue;
+        };
+        for column in useful_groups(linked) {
+            let is_taken = main.profile.iter().any(|own| own.name == column.name)
+                || found.iter().any(|known| known.column.name == column.name);
+            if !is_taken {
+                found.push(Breakdown {
+                    column,
+                    link: Some(link),
+                });
+            }
+        }
+    }
+    found.truncate(MAX_DRAFT_GROUPS);
+    found
 }
 
 fn looks_like_period(column: &ColumnProfile) -> bool {
@@ -108,6 +169,28 @@ struct Drafter<'a> {
 impl Drafter<'_> {
     fn figure(&mut self, title: &str, view: &str, spec: &QuerySpec) -> Block {
         let built = build_query(spec, self.table);
+        self.block(title, view, built, Some(spec))
+    }
+
+    // Choices can't name a column from another file, so this block keeps no spec.
+    fn linked_figure(
+        &mut self,
+        title: &str,
+        view: &str,
+        spec: &QuerySpec,
+        link: &TableLink,
+    ) -> Block {
+        let built = build_linked_query(spec, link);
+        self.block(title, view, built, None)
+    }
+
+    fn block(
+        &mut self,
+        title: &str,
+        view: &str,
+        built: BuiltQuery,
+        spec: Option<&QuerySpec>,
+    ) -> Block {
         self.next += 1;
         Block {
             id: format!("{}-{}", self.prefix, self.next),
@@ -115,7 +198,7 @@ impl Drafter<'_> {
             title: title.to_owned(),
             sql: Some(built.sql),
             trend_sql: built.trend_sql,
-            spec: serde_json::to_value(spec).ok(),
+            spec: spec.and_then(|spec| serde_json::to_value(spec).ok()),
             view: Some(view.to_owned()),
             x_column: built.x_column,
             y_column: Some(built.y_column),
@@ -201,17 +284,22 @@ fn by_group(
     page: &mut Page,
     drafter: &mut Drafter,
     profile: &[ColumnProfile],
-    group: &str,
+    breakdown: &Breakdown,
     view: &str,
 ) {
+    let group = &breakdown.column.name;
     let spec = QuerySpec {
-        by: Some(group.to_owned()),
+        by: Some(group.clone()),
         ..value_spec(drafter, profile)
     };
     let name = measures(profile)
         .first()
         .map_or("Rows".to_owned(), |measure| readable(&measure.name));
-    let block = drafter.figure(&format!("{name} by {group}"), view, &spec);
+    let title = format!("{name} by {group}");
+    let block = match breakdown.link {
+        None => drafter.figure(&title, view, &spec),
+        Some(link) => drafter.linked_figure(&title, view, &spec, link),
+    };
     place_block(page, block);
 }
 
@@ -233,13 +321,11 @@ fn add_filters(page: &mut Page, sources: &[DraftSource], main: &DraftSource) {
         .iter()
         .filter(|source| source.table.name != main.table.name)
         .flat_map(|source| {
-            groups(&source.profile)
+            useful_groups(source)
                 .into_iter()
                 .map(move |column| (source, column))
         });
-    let own = groups(&main.profile)
-        .into_iter()
-        .map(|column| (main, column));
+    let own = useful_groups(main).into_iter().map(|column| (main, column));
     for (source, column) in own.chain(linked).take(2) {
         page.filters.push(PageFilter {
             id: format!("filter-{}", column.name),
@@ -251,7 +337,13 @@ fn add_filters(page: &mut Page, sources: &[DraftSource], main: &DraftSource) {
 }
 
 // Starting points need no AI: they're worked out from what's in the data.
-pub fn draft_page(page: &mut Page, kind: DraftKind, sources: &[DraftSource], prefix: &str) -> bool {
+pub fn draft_page(
+    page: &mut Page,
+    kind: DraftKind,
+    sources: &[DraftSource],
+    links: &[TableLink],
+    prefix: &str,
+) -> bool {
     let Some(main) = main_source(sources) else {
         return false;
     };
@@ -266,16 +358,12 @@ pub fn draft_page(page: &mut Page, kind: DraftKind, sources: &[DraftSource], pre
     page.filters.clear();
     add_filters(page, sources, main);
 
-    let group_names: Vec<String> = groups(profile)
-        .iter()
-        .take(MAX_DRAFT_GROUPS)
-        .map(|column| column.name.clone())
-        .collect();
+    let breakdowns = breakdowns(main, sources, links);
     match kind {
         DraftKind::Overview => {
             numbers(page, &mut drafter, profile);
             over_time(page, &mut drafter, profile, "line");
-            if let Some(group) = group_names.first() {
+            if let Some(group) = breakdowns.first() {
                 by_group(page, &mut drafter, profile, group, "bar");
                 by_group(page, &mut drafter, profile, group, "table");
             }
@@ -298,10 +386,10 @@ pub fn draft_page(page: &mut Page, kind: DraftKind, sources: &[DraftSource], pre
         }
         DraftKind::Compare => {
             numbers(page, &mut drafter, profile);
-            for group in &group_names {
+            for group in &breakdowns {
                 by_group(page, &mut drafter, profile, group, "bar");
             }
-            if let Some(group) = group_names.first() {
+            if let Some(group) = breakdowns.first() {
                 by_group(page, &mut drafter, profile, group, "table");
             }
         }
@@ -315,7 +403,7 @@ pub fn draft_page(page: &mut Page, kind: DraftKind, sources: &[DraftSource], pre
             place_block(page, intro);
             numbers(page, &mut drafter, profile);
             over_time(page, &mut drafter, profile, "line");
-            if let Some(group) = group_names.first() {
+            if let Some(group) = breakdowns.first() {
                 by_group(page, &mut drafter, profile, group, "bar");
                 by_group(page, &mut drafter, profile, group, "table");
             }
@@ -330,7 +418,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    use davis_core::{QueryTable, open_table, profile_table, run_query, table_name};
+    use davis_core::{QueryTable, find_links, open_table, profile_table, run_query, table_name};
 
     use super::*;
 
@@ -383,9 +471,21 @@ mod tests {
                 profile: profile_table(&table.opened.source).unwrap(),
             })
             .collect();
+        let links = find_links(&query_tables(tables)).unwrap();
         let mut page = empty_page();
-        draft_page(&mut page, kind, &sources, "d");
+        draft_page(&mut page, kind, &sources, &links, "d");
         page
+    }
+
+    fn query_tables(tables: &[ProjectTable]) -> Vec<QueryTable> {
+        tables
+            .iter()
+            .map(|table| QueryTable::new(table.name.clone(), table.opened.source.clone()))
+            .collect()
+    }
+
+    fn blocks(page: &Page) -> impl Iterator<Item = &Block> {
+        page.rows.iter().flat_map(|row| &row.blocks)
     }
 
     fn titles(page: &Page) -> Vec<Vec<&str>> {
@@ -499,6 +599,53 @@ mod tests {
 
         assert_eq!(page.filters[0].table, "customers.csv");
         assert_eq!(page.filters[0].column, "region");
+    }
+
+    #[test]
+    fn a_breakdown_in_a_linked_file_is_looked_up() {
+        let folder = Folder::new();
+        let orders = folder.table("orders.csv", "customer_id,amount\n1,5\n2,6\n3,7\n");
+        let customers = folder.table(
+            "customers.csv",
+            "customer_id,region\n1,EMEA\n2,APAC\n3,EMEA\n",
+        );
+        let files = [orders, customers];
+        let tables = query_tables(&files);
+
+        let page = draft(DraftKind::Overview, &files);
+
+        let bar = blocks(&page)
+            .find(|block| block.view.as_deref() == Some("bar"))
+            .unwrap();
+        assert_eq!(bar.title, "Amount by region");
+        assert_eq!(bar.x_column.as_deref(), Some("region"));
+        let result = run_query(&tables, bar.sql.as_deref().unwrap(), Default::default()).unwrap();
+        let cell = |text: &str| Some(text.to_owned());
+        assert_eq!(
+            result.rows,
+            [[cell("EMEA"), cell("12")], [cell("APAC"), cell("6")]]
+        );
+    }
+
+    #[test]
+    fn a_column_with_one_common_value_is_not_suggested() {
+        let folder = Folder::new();
+        let mut orders = "region,note,amount\n".to_owned();
+        for row in 0..20 {
+            let region = if row % 2 == 0 { "EMEA" } else { "APAC" };
+            let note = if row == 0 { "check" } else { "ok" };
+            orders.push_str(&format!("{region},{note},{row}\n"));
+        }
+
+        let page = draft(DraftKind::Compare, &[folder.table("orders.csv", &orders)]);
+
+        let columns: Vec<&str> = page
+            .filters
+            .iter()
+            .map(|filter| filter.column.as_str())
+            .collect();
+        assert_eq!(columns, ["region"]);
+        assert!(blocks(&page).all(|block| block.x_column.as_deref() != Some("note")));
     }
 
     #[test]

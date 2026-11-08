@@ -49,6 +49,15 @@ describe("Davis", () => {
     await $(".recharts-surface").waitForDisplayed()
   })
 
+  it("filters the Page by a clicked bar, and clears it", async () => {
+    await $(".recharts-bar-rectangle").click()
+
+    const chip = $('[aria-label="Clear region APAC"]')
+    await chip.waitForDisplayed()
+    await chip.click()
+    await chip.waitForExist({ reverse: true })
+  })
+
   it("presents the Page and exits with Escape", async () => {
     await button("Present").click()
     const presenting = $('[role="dialog"][aria-label^="Presenting"]')

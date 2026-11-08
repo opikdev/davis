@@ -30,9 +30,10 @@ import {
   type Block,
   type ExportFormat,
   type Grain,
+  type ProjectColumns,
 } from "@/features/pages/api"
 import { defaultSpec } from "@/features/pages/block-settings"
-import { clickedFilter } from "@/features/pages/clicked-filter"
+import { clickedFilter, isFileColumn } from "@/features/pages/clicked-filter"
 import { ExportSheet } from "@/features/pages/export-sheet"
 import { FilterBar } from "@/features/pages/filter-bar"
 import { dataThroughLabel } from "@/features/pages/format"
@@ -68,6 +69,21 @@ export function PageView({ project, pages, hasData, isLocked }: PageViewProps) {
   const [exporting, setExporting] = useState<ExportFormat>()
   const [savedPath, setSavedPath] = useState<string>()
   const [exportError, setExportError] = useState<string>()
+  const [tables, setTables] = useState<ProjectColumns[]>([])
+
+  useEffect(() => {
+    let isCurrent = true
+    projectColumns(project)
+      .then((found) => {
+        if (isCurrent) setTables(found)
+      })
+      .catch((failure: unknown) =>
+        console.error("Could not list the columns", failure)
+      )
+    return () => {
+      isCurrent = false
+    }
+  }, [project, results])
 
   useEffect(() => {
     if (!savedPath) return
@@ -108,8 +124,7 @@ export function PageView({ project, pages, hasData, isLocked }: PageViewProps) {
     })
   }
 
-  async function selectValue(column: string, value: string, grain?: Grain) {
-    const tables = await projectColumns(project)
+  function selectValue(column: string, value: string, grain?: Grain) {
     const filter = clickedFilter(tables, column, value, grain)
     if (!filter) return
     const others = clicked.filter((item) => item.id !== filter.id)
@@ -121,8 +136,10 @@ export function PageView({ project, pages, hasData, isLocked }: PageViewProps) {
 
   const isEmpty = page.rows.length === 0
   const through = dataThroughLabel(pages.dataThrough, Object.values(results))
-  const selectChartValue = (column: string, value: string, grain?: Grain) =>
-    void selectValue(column, value, grain)
+  const selectorFor = (column: string) =>
+    isFileColumn(tables, column)
+      ? (value: string, grain?: Grain) => selectValue(column, value, grain)
+      : undefined
 
   function startExport(format: ExportFormat) {
     setSavedPath(undefined)
@@ -311,7 +328,7 @@ export function PageView({ project, pages, hasData, isLocked }: PageViewProps) {
           onSelect={pages.select}
           onRemove={pages.removeBlock}
           onTextChange={(id, text) => pages.updateBlock(id, { text })}
-          onSelectValue={selectChartValue}
+          selectorFor={selectorFor}
         />
       )}
       {isPresenting && (
@@ -319,7 +336,7 @@ export function PageView({ project, pages, hasData, isLocked }: PageViewProps) {
           project={project}
           pages={pages}
           through={through}
-          onSelectValue={selectChartValue}
+          selectorFor={selectorFor}
           onExit={() => setIsPresenting(false)}
         />
       )}

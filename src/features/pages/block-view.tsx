@@ -23,7 +23,7 @@ import {
   type QueryResult,
   type StoredQuery,
 } from "@/features/chat"
-import type { Block, BlockResult, Grain } from "@/features/pages/api"
+import type { Block, BlockResult, ValueSelector } from "@/features/pages/api"
 import {
   arrangedRows,
   formatNumber,
@@ -140,12 +140,12 @@ function FigureBody({
   block,
   outcome,
   isExporting,
-  onSelectValue,
+  selectorFor,
 }: {
   block: Block
   outcome?: BlockResult
   isExporting?: boolean
-  onSelectValue?: (column: string, value: string, grain?: Grain) => void
+  selectorFor?: (column: string) => ValueSelector | undefined
 }) {
   if (outcome?.error) {
     return (
@@ -163,17 +163,14 @@ function FigureBody({
   if (block.view === "table") {
     return <TableBody block={block} result={result} isExporting={isExporting} />
   }
-  const { xColumn } = block
+  const select = block.xColumn ? selectorFor?.(block.xColumn) : undefined
   return (
     <div className="h-56 min-h-0">
       <PageChart
         block={block}
         result={result}
         onSelect={
-          onSelectValue && xColumn
-            ? (label) =>
-                onSelectValue(xColumn, label, block.spec?.grain ?? undefined)
-            : undefined
+          select && ((label) => select(label, block.spec?.grain ?? undefined))
         }
       />
     </div>
@@ -260,7 +257,7 @@ type BlockViewProps = {
   onSelect: () => void
   onRemove: () => void
   onTextChange: (text: string) => void
-  onSelectValue?: (column: string, value: string, grain?: Grain) => void
+  selectorFor?: (column: string) => ValueSelector | undefined
 }
 
 export function BlockView({
@@ -274,7 +271,7 @@ export function BlockView({
   onSelect,
   onRemove,
   onTextChange,
-  onSelectValue,
+  selectorFor,
 }: BlockViewProps) {
   const [isViewingData, setIsViewingData] = useState(false)
   const label = block.title || (block.kind === "text" ? "Text" : "Block")
@@ -342,7 +339,7 @@ export function BlockView({
           block={block}
           outcome={outcome}
           isExporting={isExporting}
-          onSelectValue={isEditing ? undefined : onSelectValue}
+          selectorFor={isEditing ? undefined : selectorFor}
         />
       ) : (
         <TextBody

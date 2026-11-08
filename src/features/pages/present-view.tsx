@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { createPortal } from "react-dom"
 
 import { Button } from "@/components/ui/button"
-import { setFullscreen, type Grain } from "@/features/pages/api"
+import { setFullscreen, type ValueSelector } from "@/features/pages/api"
 import { FilterBar } from "@/features/pages/filter-bar"
 import { PageGrid } from "@/features/pages/page-grid"
 import type { usePage } from "@/features/pages/use-page"
@@ -22,7 +22,7 @@ type PresentViewProps = {
   project: string
   pages: ReturnType<typeof usePage>
   through?: string
-  onSelectValue: (column: string, value: string, grain?: Grain) => void
+  selectorFor: (column: string) => ValueSelector | undefined
   onExit: () => void
 }
 
@@ -30,7 +30,7 @@ export function PresentView({
   project,
   pages,
   through,
-  onSelectValue,
+  selectorFor,
   onExit,
 }: PresentViewProps) {
   const { page, results, reach, clicked, changeFilter, setClickedFilters } =
@@ -111,7 +111,7 @@ export function PresentView({
           page={page}
           results={results}
           isEditing={false}
-          onSelectValue={onSelectValue}
+          selectorFor={selectorFor}
         />
       </div>
     </div>,

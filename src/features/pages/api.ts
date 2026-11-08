@@ -11,6 +11,8 @@ export type Aggregate =
 
 export type Grain = "day" | "week" | "month" | "quarter" | "year"
 
+export type ValueSelector = (value: string, grain?: Grain) => void
+
 export type QuerySpec = {
   table: string
   aggregate: Aggregate
