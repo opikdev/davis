@@ -96,7 +96,7 @@ Davis is built with [Tauri](https://tauri.app/), [React](https://react.dev/), [s
 
 ## Contribute
 
-Issues and pull requests are welcome. Read [Contributing](CONTRIBUTING.md) first, and report security problems as [Security](SECURITY.md) describes.
+Issues and pull requests are welcome. Read [Contributing](CONTRIBUTING.md) and the [Code of conduct](CODE_OF_CONDUCT.md) first, and report security problems as [Security](SECURITY.md) describes.
 
 ## License
 
