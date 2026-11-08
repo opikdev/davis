@@ -63,6 +63,7 @@ A project can read Postgres tables live, as well as files. `crates/core/src/data
 - **Passwords:** a connection is saved in the project's `connections/` folder without its password, which goes in the system keychain. Logins are loaded from the keychain once per run into a registry in the core, because table sources travel to the frontend and back and must never carry a password.
 - **The extension:** DuckDB's Postgres extension, about 45 MB, is downloaded only when someone agrees to it, into the app's local data folder. DuckDB checks its signature before loading it. Released Mac builds have the hardened runtime, so `src-tauri/Entitlements.plist` allows libraries signed by someone else, which this extension is.
 - **Speed:** each chart and question runs on the database. Row counts for the AI come from Postgres's estimate when it has one.
+- **Offline:** `reachable_tables` in `src-tauri/src/commands/chat.rs` tries each database once per run. One that can't be reached is reported with the run, its blocks say so instead of showing an unknown-table error, and the AI's prompt lists its tables as missing. Its tables keep their names, so the others don't change name while it's away.
 - **Tests:** the live tests in `database.rs` run when `DAVIS_TEST_POSTGRES` points at a database loaded with `crates/core/fixtures/postgres.sql`. CI runs them on Linux.
 
 ## Pages

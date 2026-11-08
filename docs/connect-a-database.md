@@ -34,4 +34,6 @@ Each table appears under **Data** as `database.table`, and works like a file in 
 | The server and Davis couldn't agree on SSL | Set **Encryption (SSL)** to **Always** for hosted databases, or **Never** for one on your own computer |
 | This database needs its password again | Enter it when Davis asks. This happens on a new computer, or if the keychain entry was removed |
 
+If a database can't be reached when a Page opens, the Page says so at the top with **Try again**, or **Reconnect** if it needs the password. Blocks that use its tables explain why they're empty, and the rest of the Page still works. The AI is told which tables are missing.
+
 Big tables over a slow connection make charts slower, because each one runs on the database.

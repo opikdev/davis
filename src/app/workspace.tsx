@@ -184,6 +184,7 @@ type CurrentViewProps = {
   error?: string
   isDragging: boolean
   onBrowse: () => void
+  onReconnect: (connectionId: string) => void
 }
 
 function CurrentView({
@@ -198,6 +199,7 @@ function CurrentView({
   error,
   isDragging,
   onBrowse,
+  onReconnect,
 }: CurrentViewProps) {
   switch (view) {
     case "home":
@@ -225,6 +227,7 @@ function CurrentView({
           pages={pages}
           hasData={hasData}
           isLocked={isAsking}
+          onReconnect={onReconnect}
         />
       ) : (
         <EmptyView
@@ -297,7 +300,7 @@ export function Workspace() {
   const [isConnecting, setIsConnecting] = useState(false)
   const [reconnecting, setReconnecting] = useState<{
     connection: DatabaseConnection
-    table: ConnectedTable
+    afterwards: () => void
   }>()
   const [replacement, setReplacement] = useState<{
     file: ProjectFile
@@ -494,7 +497,10 @@ export function Workspace() {
         return await openDatabaseTable(path, connection.id, table)
       } catch (failure) {
         if (errorKind(failure) === "disconnected-database") {
-          setReconnecting({ connection, table })
+          setReconnecting({
+            connection,
+            afterwards: () => openDatabase(connection, table),
+          })
         }
         throw failure
       }
@@ -615,10 +621,9 @@ export function Workspace() {
           project={project.path}
           connection={reconnecting.connection}
           onReconnected={(updated) => {
-            const { connection, table } = reconnecting
             setReconnecting(undefined)
             void refresh(updated.path)
-            openDatabase(connection, table)
+            reconnecting.afterwards()
           }}
           onClose={() => setReconnecting(undefined)}
         />
@@ -679,6 +684,17 @@ export function Workspace() {
                   error={projectError}
                   isDragging={isDragging}
                   onBrowse={() => void browse()}
+                  onReconnect={(connectionId) => {
+                    const connection = project?.connections.find(
+                      ({ id }) => id === connectionId
+                    )
+                    if (connection) {
+                      setReconnecting({
+                        connection,
+                        afterwards: () => void reloadPage(),
+                      })
+                    }
+                  }}
                 />
                 {files.table && (
                   <div

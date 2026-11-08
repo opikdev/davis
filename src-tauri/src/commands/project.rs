@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tauri::async_runtime::spawn_blocking;
 use tauri::{AppHandle, Manager};
 
-use crate::commands::chat::project_tables;
+use crate::commands::chat::{OfflineDatabase, project_tables, reachable_tables};
 use crate::error::AppError;
 
 const RECENTS_FILE: &str = "recent-projects.json";
@@ -319,6 +319,7 @@ pub struct PageRun {
     blocks: Vec<BlockResult>,
     filters: Vec<FilterReach>,
     data_through: Option<String>,
+    offline: Vec<OfflineDatabase>,
 }
 
 fn rule_of(filter: &PageFilter) -> Option<FilterRule> {
@@ -384,12 +385,35 @@ fn apply_filters(page: &Page, tables: &mut [QueryTable], files: &[String]) -> Ve
     reach
 }
 
-fn run_block(tables: &[QueryTable], block: &Block) -> BlockResult {
+// A query over a table whose database is offline fails as an unknown table,
+// which would wrongly suggest the block itself is broken.
+fn explain_offline(failure: &davis_core::Error, offline: &[OfflineDatabase]) -> String {
+    let message = failure.to_string();
+    let words: Vec<&str> = message
+        .split(|character: char| !(character.is_alphanumeric() || character == '_'))
+        .collect();
+    offline
+        .iter()
+        .find(|database| {
+            database
+                .tables
+                .iter()
+                .any(|table| words.contains(&table.as_str()))
+        })
+        .map_or(message, |database| {
+            format!(
+                "{} couldn't be reached, so this block can't show right now.",
+                database.name
+            )
+        })
+}
+
+fn run_block(tables: &[QueryTable], block: &Block, offline: &[OfflineDatabase]) -> BlockResult {
     let run = |sql: &str| davis_core::run_query(tables, sql, Arc::default());
     let (result, error) = match block.sql.as_deref().map(run) {
         None => (None, None),
         Some(Ok(result)) => (Some(result), None),
-        Some(Err(failure)) => (None, Some(failure.to_string())),
+        Some(Err(failure)) => (None, Some(explain_offline(&failure, offline))),
     };
     BlockResult {
         id: block.id.clone(),
@@ -421,7 +445,7 @@ fn latest_date(page: &Page, tables: &[ProjectTable]) -> Option<String> {
 #[tauri::command]
 pub async fn run_page(project: String, page: Page) -> Result<PageRun, AppError> {
     spawn_blocking(move || {
-        let project_tables = project_tables(Path::new(&project))?;
+        let (project_tables, offline) = reachable_tables(Path::new(&project))?;
         let data_through = latest_date(&page, &project_tables);
         let files: Vec<String> = project_tables
             .iter()
@@ -436,12 +460,13 @@ pub async fn run_page(project: String, page: Page) -> Result<PageRun, AppError> 
             .rows
             .iter()
             .flat_map(|row| &row.blocks)
-            .map(|block| run_block(&tables, block))
+            .map(|block| run_block(&tables, block, &offline))
             .collect();
         Ok(PageRun {
             blocks,
             filters,
             data_through,
+            offline,
         })
     })
     .await?
@@ -553,4 +578,43 @@ pub async fn draft_page(
         )?)
     })
     .await?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shop_offline() -> Vec<OfflineDatabase> {
+        vec![OfflineDatabase {
+            id: "c1".to_owned(),
+            name: "shop".to_owned(),
+            tables: vec!["orders".to_owned()],
+            reason: "Couldn't connect to the database.".to_owned(),
+            needs_password: false,
+        }]
+    }
+
+    #[test]
+    fn a_block_over_an_offline_database_says_so() {
+        let failure = davis_core::Error::InvalidQuery(
+            "Catalog Error: Table with name orders does not exist!".to_owned(),
+        );
+
+        assert_eq!(
+            explain_offline(&failure, &shop_offline()),
+            "shop couldn't be reached, so this block can't show right now."
+        );
+    }
+
+    #[test]
+    fn other_block_failures_keep_their_own_message() {
+        let failure = davis_core::Error::InvalidQuery(
+            "Catalog Error: Table with name orders_archive does not exist!".to_owned(),
+        );
+
+        assert_eq!(
+            explain_offline(&failure, &shop_offline()),
+            "Catalog Error: Table with name orders_archive does not exist!"
+        );
+    }
 }

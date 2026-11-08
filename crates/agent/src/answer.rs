@@ -37,6 +37,9 @@ pub struct AgentRequest {
     #[serde(default)]
     pub active_block: Option<String>,
     pub history: Vec<PastTurn>,
+    // Set by Davis, never by the frontend: tables whose database is offline.
+    #[serde(skip)]
+    pub unavailable: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -299,6 +302,7 @@ mod tests {
                 answer: "It was 10.".to_owned(),
                 queries: vec!["SELECT 1".to_owned()],
             }],
+            unavailable: vec!["orders".to_owned()],
         };
 
         let prompt = build_prompt(&tables, &request, None);
@@ -308,6 +312,7 @@ mod tests {
         assert!(prompt.contains("The person is looking at the file sales.csv."));
         assert!(prompt.contains("Answer: It was 10."));
         assert!(prompt.contains("SQL: SELECT 1"));
+        assert!(prompt.contains("so they can't be queried: orders."));
         assert!(prompt.ends_with("Question: Why?\n"));
         assert!(!prompt.contains("secret-value"));
     }

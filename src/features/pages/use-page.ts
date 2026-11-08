@@ -10,6 +10,7 @@ import {
   type Block,
   type BlockResult,
   type DraftKind,
+  type OfflineDatabase,
   type Page,
   type PageFilter,
 } from "@/features/pages/api"
@@ -32,6 +33,7 @@ export function usePage(
   const [results, setResults] = useState<Record<string, BlockResult>>({})
   const [reach, setReach] = useState<Record<string, string[]>>({})
   const [dataThrough, setDataThrough] = useState<string | null>(null)
+  const [offline, setOffline] = useState<OfflineDatabase[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string>()
   const [isEditing, setIsEditing] = useState(false)
@@ -64,6 +66,7 @@ export function usePage(
           )
         )
         setDataThrough(finished.dataThrough)
+        setOffline(finished.offline)
         setError(undefined)
       } catch (failure) {
         if (thisRun === latestRun.current) setError(toErrorMessage(failure))
@@ -338,6 +341,7 @@ export function usePage(
     results,
     reach,
     dataThrough,
+    offline,
     isLoading,
     error,
     isEditing,

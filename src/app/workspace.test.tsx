@@ -124,6 +124,7 @@ type Backend = {
   onSaveChat?: (chat: unknown) => void
   commands?: string[]
   database?: (command: string, payload: Record<string, unknown>) => unknown
+  offline?: () => unknown[]
 }
 
 type ConnectionFixture = {
@@ -285,6 +286,7 @@ function renderWorkspace({
   onSaveChat,
   commands,
   database,
+  offline,
 }: Backend = {}) {
   let current = existing
   const savedPages = new Map(pages.map((page) => [page.id, page]))
@@ -333,6 +335,7 @@ function renderWorkspace({
         dataThrough: page.filters.some(({ kind }) => kind === "dates")
           ? "2026-04-30"
           : null,
+        offline: offline?.() ?? [],
         filters: page.filters.flatMap((filter) =>
           filter.values.length > 0 || filter.from
             ? [{ id: filter.id, files: ["sales.csv", "orders.csv"] }]
@@ -2687,5 +2690,89 @@ test("removing a database table asks first and leaves the database alone", async
   )
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: "shop.orders" })).toBeNull()
+  )
+})
+
+const SHOP_OFFLINE = {
+  id: "c1",
+  name: "shop",
+  tables: ["orders"],
+  reason:
+    "Couldn't connect to the database. The server didn't answer. Check the host and port, and that you're online.",
+  needsPassword: false,
+}
+
+test("a Page says when its database is offline, and tries again", async () => {
+  let isOnline = false
+  const runs: unknown[] = []
+  renderWorkspace(
+    pageBackend({
+      project: {
+        ...structuredClone(SAVED_PROJECT),
+        connections: [SHOP],
+        pages: [{ id: "page-1", title: "Overview", updatedAt: 1 }],
+      },
+      offline: () => (isOnline ? [] : [SHOP_OFFLINE]),
+      onRunPage: (page) => runs.push(page),
+    })
+  )
+
+  await openOverview()
+
+  expect(await screen.findByText("shop couldn't be reached")).toBeTruthy()
+  expect(screen.getByText(/The server didn't answer/)).toBeTruthy()
+  isOnline = true
+  const before = runs.length
+  await userEvent.click(screen.getByRole("button", { name: "Try again" }))
+
+  await waitFor(() => expect(runs.length).toBeGreaterThan(before))
+  await waitFor(() =>
+    expect(screen.queryByText("shop couldn't be reached")).toBeNull()
+  )
+})
+
+test("a Page whose database lost its password offers to reconnect", async () => {
+  let password: unknown
+  renderWorkspace(
+    pageBackend({
+      project: {
+        ...structuredClone(SAVED_PROJECT),
+        connections: [SHOP],
+        pages: [{ id: "page-1", title: "Overview", updatedAt: 1 }],
+      },
+      offline: () =>
+        password
+          ? []
+          : [
+              {
+                ...SHOP_OFFLINE,
+                reason:
+                  "This database needs its password again. Reconnect it to keep using its tables.",
+                needsPassword: true,
+              },
+            ],
+      database: (command, payload) => {
+        if (command === "reconnect_database") {
+          password = payload.password
+          return { ...structuredClone(SAVED_PROJECT), connections: [SHOP] }
+        }
+      },
+    })
+  )
+
+  await openOverview()
+  await userEvent.click(
+    await screen.findByRole("button", { name: "Reconnect" })
+  )
+  await userEvent.type(await screen.findByLabelText("Password"), "s3cret")
+  await userEvent.click(
+    within(await screen.findByRole("dialog")).getByRole("button", {
+      name: "Reconnect",
+    })
+  )
+
+  expect(password).toBe("s3cret")
+  await waitFor(() =>
+    expect(screen.queryByText("shop couldn't be reached")).toBeNull()
   )
 })

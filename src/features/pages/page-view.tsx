@@ -1,5 +1,6 @@
 import {
   Add01Icon,
+  AlertCircleIcon,
   ArrowDown01Icon,
   ArrowTurnBackwardIcon,
   ArrowTurnForwardIcon,
@@ -16,6 +17,12 @@ import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react"
 import { revealItemInDir } from "@tauri-apps/plugin-opener"
 import { useEffect, useState } from "react"
 
+import {
+  Alert,
+  AlertAction,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -59,9 +66,16 @@ type PageViewProps = {
   pages: ReturnType<typeof usePage>
   hasData: boolean
   isLocked: boolean
+  onReconnect: (connectionId: string) => void
 }
 
-export function PageView({ project, pages, hasData, isLocked }: PageViewProps) {
+export function PageView({
+  project,
+  pages,
+  hasData,
+  isLocked,
+  onReconnect,
+}: PageViewProps) {
   const { page, results, reach, error, isEditing, selectedId, clicked } = pages
   const { undo, redo } = pages
   const canEdit = isEditing && !isLocked
@@ -304,6 +318,32 @@ export function PageView({ project, pages, hasData, isLocked }: PageViewProps) {
           pages.setClickedFilters(clicked.filter((item) => item.id !== id))
         }
       />
+      {pages.offline.map((database) => (
+        <Alert key={database.id} className="mx-3 w-auto shrink-0">
+          <HugeiconsIcon icon={AlertCircleIcon} strokeWidth={1.5} />
+          <AlertTitle>{database.name} couldn&apos;t be reached</AlertTitle>
+          <AlertDescription>{database.reason}</AlertDescription>
+          <AlertAction>
+            {database.needsPassword ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onReconnect(database.id)}
+              >
+                Reconnect
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void pages.reload()}
+              >
+                Try again
+              </Button>
+            )}
+          </AlertAction>
+        </Alert>
+      ))}
       {through && !canEdit && (
         <p className="-mt-1.5 shrink-0 px-3 text-xs text-subtle">{through}</p>
       )}

@@ -98,6 +98,13 @@ pub(crate) fn build_prompt(
             table.name, table.opened.name, table.opened.row_count
         );
     }
+    if !request.unavailable.is_empty() {
+        let _ = writeln!(
+            prompt,
+            "\nThese tables are in a database Davis can't reach right now, so they can't be queried: {}. If the question needs them, say so plainly.",
+            request.unavailable.join(", ")
+        );
+    }
     if let Some(active) = &request.active_table {
         let _ = writeln!(prompt, "\nThe person is looking at the file {active}.");
     }

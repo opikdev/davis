@@ -75,10 +75,19 @@ export type BlockResult = {
   sources: Record<string, QueryResult>
 }
 
+export type OfflineDatabase = {
+  id: string
+  name: string
+  tables: string[]
+  reason: string
+  needsPassword: boolean
+}
+
 export type PageRun = {
   blocks: BlockResult[]
   filters: { id: string; files: string[] }[]
   dataThrough: string | null
+  offline: OfflineDatabase[]
 }
 
 export type ProjectColumns = {
