@@ -4,4 +4,4 @@ Report a vulnerability through GitHub's private vulnerability reporting on this 
 
 Include what you found, how to reproduce it, and which version and operating system you tested.
 
-Davis stores API keys in the OS keychain and keeps files on your computer. See [Architecture](docs/architecture.md) for how keys and addresses are handled.
+Davis stores API keys and database passwords in the OS keychain and keeps files on your computer. See [Architecture](docs/architecture.md) for how keys and addresses are handled.
