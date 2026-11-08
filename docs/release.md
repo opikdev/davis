@@ -9,7 +9,7 @@ The [Release workflow](../.github/workflows/release.yml) builds installers for m
 3. Wait for the workflow to finish. It creates a draft release with every installer attached.
 4. Download each installer and check that it opens, following [Install Davis](install.md).
 5. Write the release notes and publish the draft.
-6. Check that the published release's address ends in `/tag/v<VERSION>`. A draft's address shows `untagged-...`, and editing a draft by that name can publish it under a new `untagged-...` tag. To fix it, run `gh api -X PATCH repos/opikdev/davis/releases/<RELEASE_ID> -f tag_name=v<VERSION>`, then delete the stray tag with `git push origin :refs/tags/untagged-<ID>`.
+6. Check that the published release's address ends in `/tag/v<VERSION>`. Editing a draft through the API without `tag_name` resets its tag to `untagged-...`, and publishing it then creates that tag. Always send both: `gh api -X PATCH repos/opikdev/davis/releases/<RELEASE_ID> -f tag_name=v<VERSION> -F body=@notes.md`. If a release went out on an `untagged-...` tag, run the same command without `body`, then delete the stray tag with `git push origin :refs/tags/untagged-<ID>`.
 
 To build installers without a release, run the workflow from the Actions tab. They're attached to the run as artifacts.
 
