@@ -64,7 +64,7 @@ describe("Davis", () => {
   })
 
   it("filters the Page by a clicked bar, and clears it", async () => {
-    await clickWhenSettled(".recharts-bar-rectangle")
+    await clickWhenSettled(".recharts-bar-rectangle .recharts-rectangle")
 
     const chip = $('[aria-label="Clear region APAC"]')
     await chip.waitForDisplayed()
