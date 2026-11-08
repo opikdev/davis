@@ -2,7 +2,7 @@
 
 Local data workspace built with Rust, Tauri, and React. Your files stay on your computer, and you choose which AI to connect.
 
-Early scaffold: the app runs onboarding, connects to an AI provider, keeps your work in project folders, opens Excel, CSV, Parquet, and JSON files in a table with a brief and column stats, has an AI analyst that can query every file in a project and explain what it finds with charts, and builds dashboards called Pages, from starting points, simple choices, or the AI, which you can present full screen or export as PDF or PNG. It can also read Postgres tables live. MySQL and Google Sheets are not built yet.
+Early scaffold: the app runs onboarding, connects to an AI provider, keeps your work in project folders, opens Excel, CSV, Parquet, and JSON files in a table with a brief and column stats, has an AI analyst that can query every file in a project and explain what it finds with charts, and builds dashboards called Pages, from starting points, simple choices, or the AI, which you can present full screen or export as PDF or PNG. It can also read Postgres and MySQL tables live. Google Sheets is not built yet.
 
 A project is a normal folder, in `Documents/Davis` by default. Davis copies your files into its `data` folder and saves each chat in `chats` and each Page in `pages`, so you can move or back up a project like any other folder.
 

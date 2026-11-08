@@ -2,7 +2,7 @@ use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use davis_core::SslMode;
+use davis_core::{DatabaseKind, SslMode};
 use keyring::Entry;
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +27,8 @@ pub struct ConnectedTable {
 #[serde(rename_all = "camelCase")]
 pub struct DatabaseConnection {
     pub id: String,
+    #[serde(default = "postgres")]
+    pub kind: DatabaseKind,
     pub name: String,
     pub host: String,
     pub port: u16,
@@ -34,6 +36,11 @@ pub struct DatabaseConnection {
     pub user: String,
     pub ssl: SslMode,
     pub tables: Vec<ConnectedTable>,
+}
+
+// Connections saved before MySQL arrived were all Postgres.
+fn postgres() -> DatabaseKind {
+    DatabaseKind::Postgres
 }
 
 fn check_id(id: &str) -> Result<()> {
@@ -151,6 +158,7 @@ mod tests {
     fn shop(id: &str) -> DatabaseConnection {
         DatabaseConnection {
             id: id.to_owned(),
+            kind: DatabaseKind::Postgres,
             name: "shop".to_owned(),
             host: "db.example.com".to_owned(),
             port: 5432,
@@ -198,6 +206,18 @@ mod tests {
         for id in ["../escape", "a/b", "", "with space"] {
             assert!(save_connection(project, &shop(id)).is_err(), "{id}");
         }
+    }
+
+    #[test]
+    fn a_connection_saved_before_mysql_reads_as_postgres() {
+        let folder = Folder::new();
+        let project = create_project(&folder.0, "Sales").unwrap();
+        let project = Path::new(&project.path);
+        let mut saved = serde_json::to_value(shop("c1")).unwrap();
+        saved.as_object_mut().unwrap().remove("kind");
+        write_json(&project.join(CONNECTIONS_FOLDER).join("c1.json"), &saved).unwrap();
+
+        assert_eq!(list_connections(project).unwrap(), [shop("c1")]);
     }
 
     #[test]

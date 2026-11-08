@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -26,12 +26,14 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
   addDatabase,
-  installPostgresSupport,
-  postgresSupport,
+  databaseSupport,
+  installDatabaseSupport,
   testDatabase,
   type ConnectedTable,
+  type DatabaseKind,
   type DatabaseLogin,
   type DatabaseTableInfo,
   type SslMode,
@@ -39,7 +41,10 @@ import {
 import type { Project } from "@/features/projects"
 import { toErrorMessage } from "@/lib/ipc-error"
 
-const DEFAULT_PORT = 5432
+const KINDS: { value: DatabaseKind; label: string; port: number }[] = [
+  { value: "postgres", label: "Postgres", port: 5432 },
+  { value: "mysql", label: "MySQL", port: 3306 },
+]
 const SSL_OPTIONS: { value: SslMode; label: string }[] = [
   { value: "prefer", label: "Use if the server has it" },
   { value: "require", label: "Always" },
@@ -54,7 +59,11 @@ const EXACT_TEXT = {
   spellCheck: false,
 } as const
 
-type Step = "checking" | "download" | "details" | "tables"
+type Step = "details" | "download" | "tables"
+
+function kindOf(value: DatabaseKind) {
+  return KINDS.find((kind) => kind.value === value) ?? KINDS[0]
+}
 
 type ConnectDatabaseDialogProps = {
   project: Project
@@ -80,10 +89,11 @@ export function ConnectDatabaseDialog({
   onAdded,
   onClose,
 }: ConnectDatabaseDialogProps) {
-  const [step, setStep] = useState<Step>("checking")
+  const [step, setStep] = useState<Step>("details")
   const [login, setLogin] = useState<DatabaseLogin>({
+    kind: "postgres",
     host: "",
-    port: DEFAULT_PORT,
+    port: KINDS[0].port,
     database: "",
     user: "",
     password: "",
@@ -94,21 +104,7 @@ export function ConnectDatabaseDialog({
   const [error, setError] = useState<string>()
   const [isWorking, setIsWorking] = useState(false)
 
-  useEffect(() => {
-    let isCurrent = true
-    postgresSupport()
-      .then((isReady) => {
-        if (isCurrent) setStep(isReady ? "details" : "download")
-      })
-      .catch((failure: unknown) => {
-        if (!isCurrent) return
-        setError(toErrorMessage(failure))
-        setStep("download")
-      })
-    return () => {
-      isCurrent = false
-    }
-  }, [])
+  const kind = kindOf(login.kind)
 
   async function work(task: () => Promise<void>) {
     setIsWorking(true)
@@ -122,19 +118,28 @@ export function ConnectDatabaseDialog({
     }
   }
 
+  async function findTables() {
+    const found = await testDatabase(login)
+    setTables(found)
+    setChosen(new Set())
+    setStep("tables")
+  }
+
   const download = () =>
     work(async () => {
-      await installPostgresSupport()
-      setStep("details")
+      await installDatabaseSupport(login.kind)
+      await findTables()
     })
 
+  // Support for each kind of database is a separate one-time download.
   const test = (event: React.FormEvent) => {
     event.preventDefault()
     return work(async () => {
-      const found = await testDatabase(login)
-      setTables(found)
-      setChosen(new Set())
-      setStep("tables")
+      if (await databaseSupport(login.kind)) {
+        await findTables()
+      } else {
+        setStep("download")
+      }
     })
   }
 
@@ -148,6 +153,7 @@ export function ConnectDatabaseDialog({
         project.path,
         {
           id,
+          kind: login.kind,
           name: freeName(project, login.database.trim()),
           host: login.host.trim(),
           port: login.port,
@@ -175,6 +181,15 @@ export function ConnectDatabaseDialog({
     setLogin({ ...login, [field]: value })
   }
 
+  function changeKind(next: DatabaseKind) {
+    const isDefaultPort = KINDS.some(({ port }) => port === login.port)
+    setLogin({
+      ...login,
+      kind: next,
+      port: isDefaultPort ? kindOf(next).port : login.port,
+    })
+  }
+
   const isComplete =
     login.host.trim() !== "" &&
     login.database.trim() !== "" &&
@@ -186,29 +201,27 @@ export function ConnectDatabaseDialog({
     <Dialog open onOpenChange={(isOpen) => !isOpen && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Connect a Postgres database</DialogTitle>
+          <DialogTitle>Connect a database</DialogTitle>
           <DialogDescription>
             Charts and answers read the database live. Davis only reads, and a
             read-only database user is safest.
           </DialogDescription>
         </DialogHeader>
 
-        {step === "checking" && (
-          <div className="flex justify-center py-6">
-            <Spinner />
-          </div>
-        )}
-
         {step === "download" && (
           <>
             <p className="text-sm">
-              Davis needs Postgres support first. It&apos;s a one-time download
-              of about 45 MB from DuckDB, the engine Davis runs on.
+              Davis needs {kind.label} support first. It&apos;s a one-time
+              download of about 45 MB from DuckDB, the engine Davis runs on.
             </p>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <DialogFooter>
-              <Button type="button" variant="ghost" onClick={onClose}>
-                Cancel
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setStep("details")}
+              >
+                Back
               </Button>
               <Button
                 type="button"
@@ -225,6 +238,29 @@ export function ConnectDatabaseDialog({
         {step === "details" && (
           <form className="flex flex-col gap-4" onSubmit={(e) => void test(e)}>
             <FieldGroup className="gap-3">
+              <Field>
+                <FieldLabel id="database-kind">Type</FieldLabel>
+                <ToggleGroup
+                  aria-labelledby="database-kind"
+                  value={[login.kind]}
+                  onValueChange={(next: string[]) => {
+                    const picked = next[0] as DatabaseKind | undefined
+                    if (picked) changeKind(picked)
+                  }}
+                  className="justify-start"
+                >
+                  {KINDS.map(({ value, label }) => (
+                    <ToggleGroupItem
+                      key={value}
+                      value={value}
+                      size="sm"
+                      variant="outline"
+                    >
+                      {label}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+              </Field>
               <div className="grid grid-cols-[1fr_6rem] gap-3">
                 <Field>
                   <FieldLabel htmlFor="database-host">Host</FieldLabel>
@@ -348,7 +384,10 @@ export function ConnectDatabaseDialog({
                         }
                       />
                       <span className="min-w-0 flex-1 truncate">
-                        {table.schema === "public" ? table.table : key(table)}
+                        {table.schema === "public" ||
+                        table.schema === login.database.trim()
+                          ? table.table
+                          : key(table)}
                       </span>
                       {Boolean(table.estimatedRows) && (
                         <span className="text-xs text-subtle tabular-nums">

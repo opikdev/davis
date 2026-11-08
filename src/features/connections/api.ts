@@ -5,6 +5,8 @@ import type { Project } from "@/features/projects"
 
 export type SslMode = "disable" | "prefer" | "require"
 
+export type DatabaseKind = "postgres" | "mysql"
+
 export type ConnectedTable = {
   schema: string
   table: string
@@ -12,6 +14,7 @@ export type ConnectedTable = {
 
 export type DatabaseConnection = {
   id: string
+  kind: DatabaseKind
   name: string
   host: string
   port: number
@@ -22,6 +25,7 @@ export type DatabaseConnection = {
 }
 
 export type DatabaseLogin = {
+  kind: DatabaseKind
   host: string
   port: number
   database: string
@@ -36,21 +40,25 @@ export type DatabaseTableInfo = {
   estimatedRows: number | null
 }
 
+// The default schema adds nothing to a name: Postgres's is "public", and a
+// MySQL database is its own schema.
 export function tableLabel(
   connection: DatabaseConnection,
   { schema, table }: ConnectedTable
 ) {
-  return schema === "public"
+  const defaultSchema =
+    connection.kind === "mysql" ? connection.database : "public"
+  return schema === defaultSchema
     ? `${connection.name}.${table}`
     : `${connection.name}.${schema}.${table}`
 }
 
-export function postgresSupport() {
-  return invoke<boolean>("postgres_support")
+export function databaseSupport(kind: DatabaseKind) {
+  return invoke<boolean>("database_support", { kind })
 }
 
-export function installPostgresSupport() {
-  return invoke<void>("install_postgres_support")
+export function installDatabaseSupport(kind: DatabaseKind) {
+  return invoke<void>("install_database_support", { kind })
 }
 
 export function testDatabase(login: DatabaseLogin) {

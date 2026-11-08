@@ -57,14 +57,15 @@ A CLI's sandbox is not enough on its own. Codex's `read-only` sandbox only block
 
 ## Live databases
 
-A project can read Postgres tables live, as well as files. `crates/core/src/database.rs` attaches each database to every DuckDB connection that needs it, so filters, Pages, links and the AI treat a live table like a file.
+A project can read Postgres and MySQL tables live, as well as files. `crates/core/src/database.rs` attaches each database to every DuckDB connection that needs it, so filters, Pages, links and the AI treat a live table like a file.
 
-- **Read-only, three times over:** the database is attached `READ_ONLY`, so Postgres itself refuses writes, and `require_one_select` blocks `postgres_query`, `postgres_execute` and the other `postgres_*` functions, which run any SQL given to them. People should still connect with a read-only user.
+- **Read-only, three times over:** each database is attached `READ_ONLY`, so the database itself refuses writes, and `require_one_select` blocks the `postgres_*` and `mysql_*` functions, which run any SQL given to them. People should still connect with a read-only user.
+- **Logins:** Postgres gets a quoted connection string. MySQL's connection string has no quoting, so its login goes in a temporary DuckDB secret instead, as plain SQL strings.
 - **Passwords:** a connection is saved in the project's `connections/` folder without its password, which goes in the system keychain. Logins are loaded from the keychain once per run into a registry in the core, because table sources travel to the frontend and back and must never carry a password.
-- **The extension:** DuckDB's Postgres extension, about 45 MB, is downloaded only when someone agrees to it, into the app's local data folder. DuckDB checks its signature before loading it. Released Mac builds have the hardened runtime, so `src-tauri/Entitlements.plist` allows libraries signed by someone else, which this extension is.
+- **The extensions:** DuckDB's Postgres and MySQL extensions, about 45 MB each, are downloaded only when someone agrees to it, into the app's local data folder. DuckDB checks their signatures before loading them. Released Mac builds have the hardened runtime, so `src-tauri/Entitlements.plist` allows libraries signed by someone else, which these extensions are.
 - **Speed:** each chart and question runs on the database. Row counts for the AI come from Postgres's estimate when it has one.
 - **Offline:** `reachable_tables` in `src-tauri/src/commands/chat.rs` tries each database once per run. One that can't be reached is reported with the run, its blocks say so instead of showing an unknown-table error, and the AI's prompt lists its tables as missing. Its tables keep their names, so the others don't change name while it's away.
-- **Tests:** the live tests in `database.rs` run when `DAVIS_TEST_POSTGRES` points at a database loaded with `crates/core/fixtures/postgres.sql`. CI runs them on Linux.
+- **Tests:** the live tests in `database.rs` run when `DAVIS_TEST_POSTGRES` and `DAVIS_TEST_MYSQL` point at databases loaded with the files in `crates/core/fixtures/`. CI runs them on Linux.
 
 ## Pages
 

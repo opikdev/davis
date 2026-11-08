@@ -260,7 +260,11 @@ fn calls_database_function(value: &Value) -> bool {
                 .get("function_name")
                 .and_then(Value::as_str)
                 .map(str::to_lowercase)
-                .is_some_and(|name| name.starts_with("postgres_") || name.starts_with("pg_"));
+                .is_some_and(|name| {
+                    ["postgres_", "pg_", "mysql_"]
+                        .iter()
+                        .any(|prefix| name.starts_with(prefix))
+                });
             is_direct || fields.values().any(calls_database_function)
         }
         Value::Array(items) => items.iter().any(calls_database_function),
@@ -480,6 +484,7 @@ mod tests {
             "SELECT 1; SELECT 2",
             "SELECT * FROM postgres_query('db', 'DELETE FROM t')",
             "SELECT 1 WHERE EXISTS (SELECT * FROM Postgres_Execute('db', 'DROP TABLE t'))",
+            "SELECT * FROM mysql_query('db', 'DELETE FROM t')",
         ] {
             assert_eq!(code(&source, sql), "rejected-query", "{sql}");
         }

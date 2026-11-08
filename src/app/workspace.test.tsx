@@ -129,6 +129,7 @@ type Backend = {
 
 type ConnectionFixture = {
   id: string
+  kind: string
   name: string
   host: string
   port: number
@@ -251,8 +252,8 @@ function fileOf(table: { name: string; source: { path: string } }) {
 }
 
 const DATABASE_COMMANDS = [
-  "postgres_support",
-  "install_postgres_support",
+  "database_support",
+  "install_database_support",
   "test_database",
   "add_database",
   "reconnect_database",
@@ -2495,6 +2496,7 @@ test("the window can be dragged from the top of the sidebar and panel", () => {
 
 const SHOP: ConnectionFixture = {
   id: "c1",
+  kind: "postgres",
   name: "shop",
   host: "db.example.com",
   port: 5432,
@@ -2528,8 +2530,8 @@ test("connecting a database downloads support once, then adds the picked tables"
       project,
       database: (command, payload) => {
         calls.push([command, payload])
-        if (command === "postgres_support") return isInstalled
-        if (command === "install_postgres_support") {
+        if (command === "database_support") return isInstalled
+        if (command === "install_database_support") {
           isInstalled = true
           return undefined
         }
@@ -2550,12 +2552,12 @@ test("connecting a database downloads support once, then adds the picked tables"
   await screen.findByText("Saved answer")
 
   await addData("Connect a database")
-  await userEvent.click(await screen.findByRole("button", { name: "Download" }))
   await userEvent.type(await screen.findByLabelText("Host"), "db.example.com")
   await userEvent.type(screen.getByLabelText("Database"), "shop")
   await userEvent.type(screen.getByLabelText("User"), "reader")
   await userEvent.type(screen.getByLabelText("Password"), "s3cret")
   await userEvent.click(screen.getByRole("button", { name: "Test connection" }))
+  await userEvent.click(await screen.findByRole("button", { name: "Download" }))
   await userEvent.click(await screen.findByRole("checkbox", { name: /orders/ }))
   await userEvent.click(screen.getByRole("button", { name: "Add 1 table" }))
 
@@ -2563,6 +2565,7 @@ test("connecting a database downloads support once, then adds the picked tables"
   expect(added).toMatchObject({
     password: "s3cret",
     connection: {
+      kind: "postgres",
       name: "shop",
       host: "db.example.com",
       port: 5432,
@@ -2582,7 +2585,7 @@ test("a database that couldn't be reached says why and keeps the form", async ()
   renderWorkspace(
     projectBackend({
       database: (command) => {
-        if (command === "postgres_support") return true
+        if (command === "database_support") return true
         if (command === "test_database") {
           throw {
             kind: "unreachable-database",
@@ -2775,4 +2778,37 @@ test("a Page whose database lost its password offers to reconnect", async () => 
   await waitFor(() =>
     expect(screen.queryByText("shop couldn't be reached")).toBeNull()
   )
+})
+
+test("a MySQL database uses its own port and its own download", async () => {
+  const calls: [string, Record<string, unknown>][] = []
+  renderWorkspace(
+    projectBackend({
+      database: (command, payload) => {
+        calls.push([command, payload])
+        if (command === "database_support") return false
+        if (command === "test_database") {
+          return [{ schema: "shop", table: "orders", estimatedRows: null }]
+        }
+      },
+    })
+  )
+  await screen.findByText("Saved answer")
+
+  await addData("Connect a database")
+  await userEvent.click(await screen.findByRole("button", { name: "MySQL" }))
+  expect(screen.getByLabelText("Port")).toHaveProperty("value", "3306")
+  await userEvent.type(screen.getByLabelText("Host"), "db.example.com")
+  await userEvent.type(screen.getByLabelText("Database"), "shop")
+  await userEvent.type(screen.getByLabelText("User"), "reader")
+  await userEvent.click(screen.getByRole("button", { name: "Test connection" }))
+
+  expect(await screen.findByText(/needs MySQL support first/)).toBeTruthy()
+  await userEvent.click(screen.getByRole("button", { name: "Download" }))
+
+  expect(await screen.findByRole("checkbox", { name: "orders" })).toBeTruthy()
+  expect(calls).toContainEqual(["install_database_support", { kind: "mysql" }])
+  expect(
+    calls.find(([command]) => command === "test_database")?.[1]
+  ).toMatchObject({ login: { kind: "mysql", port: 3306 } })
 })

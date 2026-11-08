@@ -171,7 +171,7 @@ pub fn answer_agent(registry: State<'_, AskRegistry>, turn: u64, reply: String) 
 mod tests {
     use std::fs;
 
-    use davis_core::{PostgresLogin, SslMode};
+    use davis_core::{DatabaseKind, DatabaseLogin, SslMode};
     use davis_project::{ConnectedTable, DatabaseConnection};
 
     use super::*;
@@ -184,7 +184,7 @@ mod tests {
         }
         let extensions = std::env::temp_dir().join("davis-test-extensions");
         davis_core::set_extension_folder(&extensions);
-        davis_core::install_postgres_support().unwrap();
+        davis_core::install_database_support(DatabaseKind::Postgres).unwrap();
         let parent = std::env::temp_dir().join(format!("davis-offline-{}", std::process::id()));
         let project = davis_project::create_project(&parent, "Sales").unwrap();
         let folder = Path::new(&project.path);
@@ -195,6 +195,7 @@ mod tests {
         .unwrap();
         let connection = DatabaseConnection {
             id: "offline-test".to_owned(),
+            kind: DatabaseKind::Postgres,
             name: "shop".to_owned(),
             host: "127.0.0.1".to_owned(),
             port: 1,
@@ -209,7 +210,8 @@ mod tests {
         davis_project::save_connection(folder, &connection).unwrap();
         davis_core::remember_login(
             "offline-test",
-            PostgresLogin {
+            DatabaseLogin {
+                kind: DatabaseKind::Postgres,
                 host: "127.0.0.1".to_owned(),
                 port: 1,
                 database: "shop".to_owned(),

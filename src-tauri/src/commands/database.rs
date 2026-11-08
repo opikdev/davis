@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use davis_core::{DatabaseTableInfo, OpenedTable, PostgresLogin, RemoteTable, RowCount, SslMode};
+use davis_core::{
+    DatabaseKind, DatabaseLogin, DatabaseTableInfo, OpenedTable, RemoteTable, RowCount, SslMode,
+};
 use davis_project::{DatabaseConnection, Project};
 use serde::Deserialize;
 use tauri::async_runtime::spawn_blocking;
@@ -10,6 +12,7 @@ use crate::error::AppError;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginRequest {
+    kind: DatabaseKind,
     host: String,
     port: u16,
     database: String,
@@ -18,9 +21,10 @@ pub struct LoginRequest {
     ssl: SslMode,
 }
 
-impl From<LoginRequest> for PostgresLogin {
+impl From<LoginRequest> for DatabaseLogin {
     fn from(request: LoginRequest) -> Self {
         Self {
+            kind: request.kind,
             host: request.host.trim().to_owned(),
             port: request.port,
             database: request.database.trim().to_owned(),
@@ -31,8 +35,9 @@ impl From<LoginRequest> for PostgresLogin {
     }
 }
 
-fn login_for(connection: &DatabaseConnection, password: String) -> PostgresLogin {
-    PostgresLogin {
+fn login_for(connection: &DatabaseConnection, password: String) -> DatabaseLogin {
+    DatabaseLogin {
+        kind: connection.kind,
         host: connection.host.clone(),
         port: connection.port,
         database: connection.database.clone(),
@@ -56,8 +61,14 @@ pub(crate) fn remember_logins(project: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
+// The default schema adds nothing to a name: Postgres's is "public", and a
+// MySQL database is its own schema.
 pub(crate) fn table_label(connection: &DatabaseConnection, schema: &str, table: &str) -> String {
-    if schema == "public" {
+    let default_schema = match connection.kind {
+        DatabaseKind::Postgres => "public",
+        DatabaseKind::Mysql => connection.database.as_str(),
+    };
+    if schema == default_schema {
         format!("{}.{table}", connection.name)
     } else {
         format!("{}.{schema}.{table}", connection.name)
@@ -72,19 +83,19 @@ fn find_connection(project: &Path, id: &str) -> Result<DatabaseConnection, AppEr
 }
 
 #[tauri::command]
-pub async fn postgres_support() -> Result<bool, AppError> {
-    Ok(spawn_blocking(davis_core::has_postgres_support).await??)
+pub async fn database_support(kind: DatabaseKind) -> Result<bool, AppError> {
+    Ok(spawn_blocking(move || davis_core::has_database_support(kind)).await??)
 }
 
 #[tauri::command]
-pub async fn install_postgres_support() -> Result<(), AppError> {
-    Ok(spawn_blocking(davis_core::install_postgres_support).await??)
+pub async fn install_database_support(kind: DatabaseKind) -> Result<(), AppError> {
+    Ok(spawn_blocking(move || davis_core::install_database_support(kind)).await??)
 }
 
 #[tauri::command]
 pub async fn test_database(login: LoginRequest) -> Result<Vec<DatabaseTableInfo>, AppError> {
-    let login = PostgresLogin::from(login);
-    Ok(spawn_blocking(move || davis_core::test_postgres(&login)).await??)
+    let login = DatabaseLogin::from(login);
+    Ok(spawn_blocking(move || davis_core::test_database(&login)).await??)
 }
 
 #[tauri::command]
@@ -96,7 +107,7 @@ pub async fn add_database(
     spawn_blocking(move || {
         let folder = Path::new(&project);
         let login = login_for(&connection, password.clone());
-        davis_core::test_postgres(&login)?;
+        davis_core::test_database(&login)?;
         davis_project::save_password(&connection.id, &password)?;
         davis_project::save_connection(folder, &connection)?;
         davis_core::remember_login(&connection.id, login);
@@ -115,7 +126,7 @@ pub async fn reconnect_database(
         let folder = Path::new(&project);
         let connection = find_connection(folder, &id)?;
         let login = login_for(&connection, password.clone());
-        davis_core::test_postgres(&login)?;
+        davis_core::test_database(&login)?;
         davis_project::save_password(&id, &password)?;
         davis_core::remember_login(&id, login);
         Ok(davis_project::read_project(folder)?)

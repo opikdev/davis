@@ -8,8 +8,37 @@ use serde::{Deserialize, Serialize};
 use crate::table::{TableSource, connect, quoted};
 use crate::{Error, Result};
 
-const POSTGRES_EXTENSION: &str = "postgres_scanner";
 const CONNECT_TIMEOUT_SECONDS: u32 = 10;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DatabaseKind {
+    Postgres,
+    Mysql,
+}
+
+impl DatabaseKind {
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Postgres => "postgres",
+            Self::Mysql => "mysql",
+        }
+    }
+
+    fn installed_name(self) -> &'static str {
+        match self {
+            Self::Postgres => "postgres_scanner",
+            Self::Mysql => "mysql_scanner",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Postgres => "Postgres",
+            Self::Mysql => "MySQL",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -22,7 +51,8 @@ pub enum SslMode {
 // The password never leaves the backend, so this is built there from the
 // project's saved connection and the keychain.
 #[derive(Clone, PartialEq, Eq)]
-pub struct PostgresLogin {
+pub struct DatabaseLogin {
+    pub kind: DatabaseKind,
     pub host: String,
     pub port: u16,
     pub database: String,
@@ -31,8 +61,8 @@ pub struct PostgresLogin {
     pub ssl: SslMode,
 }
 
-impl PostgresLogin {
-    fn connection_string(&self) -> String {
+impl DatabaseLogin {
+    fn postgres_string(&self) -> String {
         let value = |text: &str| format!("'{}'", text.replace('\\', "\\\\").replace('\'', "\\'"));
         let ssl = match self.ssl {
             SslMode::Disable => "disable",
@@ -46,6 +76,24 @@ impl PostgresLogin {
             value(&self.database),
             value(&self.user),
             value(&self.password),
+        )
+    }
+
+    // MySQL's connection string has no quoting, so each value goes in a
+    // temporary secret as a plain SQL string instead.
+    fn mysql_secret(&self, name: &str) -> String {
+        let ssl = match self.ssl {
+            SslMode::Disable => "disabled",
+            SslMode::Prefer => "preferred",
+            SslMode::Require => "required",
+        };
+        format!(
+            "CREATE OR REPLACE TEMPORARY SECRET {name} (TYPE mysql, HOST {}, PORT {}, DATABASE {}, USER {}, PASSWORD {}, SSL_MODE '{ssl}');",
+            quoted(&self.host),
+            self.port,
+            quoted(&self.database),
+            quoted(&self.user),
+            quoted(&self.password),
         )
     }
 }
@@ -68,7 +116,7 @@ pub struct DatabaseTableInfo {
 
 struct Registry {
     extensions: Option<PathBuf>,
-    logins: BTreeMap<String, PostgresLogin>,
+    logins: BTreeMap<String, DatabaseLogin>,
 }
 
 static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
@@ -85,7 +133,7 @@ pub fn set_extension_folder(folder: &Path) {
     registry().extensions = Some(folder.to_path_buf());
 }
 
-pub fn remember_login(connection: &str, login: PostgresLogin) {
+pub fn remember_login(connection: &str, login: DatabaseLogin) {
     registry().logins.insert(connection.to_owned(), login);
 }
 
@@ -108,23 +156,27 @@ fn extension_settings() -> Result<String> {
     ))
 }
 
-pub fn has_postgres_support() -> Result<bool> {
+pub fn has_database_support(kind: DatabaseKind) -> Result<bool> {
     let connection = connect()?;
     connection.execute_batch(&extension_settings()?)?;
     let installed = connection.query_row(
         "SELECT count(*) > 0 FROM duckdb_extensions() WHERE extension_name = ? AND installed",
-        [POSTGRES_EXTENSION],
+        [kind.installed_name()],
         |row| row.get(0),
     )?;
     Ok(installed)
 }
 
-pub fn install_postgres_support() -> Result<()> {
+pub fn install_database_support(kind: DatabaseKind) -> Result<()> {
     let connection = connect()?;
     connection
-        .execute_batch(&format!("{}INSTALL postgres;", extension_settings()?))
+        .execute_batch(&format!(
+            "{}INSTALL {};",
+            extension_settings()?,
+            kind.extension()
+        ))
         .map_err(|error| {
-            eprintln!("Could not download Postgres support: {error}");
+            eprintln!("Could not download {} support: {error}", kind.label());
             Error::DatabaseSupportDownload
         })
 }
@@ -164,33 +216,51 @@ pub(crate) fn remote_scan(remote: &RemoteTable) -> String {
     )
 }
 
-fn attach(connection: &Connection, name: &str, login: &PostgresLogin) -> Result<()> {
-    connection
-        .execute_batch(&format!(
+fn attach(connection: &Connection, name: &str, login: &DatabaseLogin) -> Result<()> {
+    let sql = match login.kind {
+        DatabaseKind::Postgres => format!(
             "ATTACH {} AS {} (TYPE postgres, READ_ONLY);",
-            quoted(&login.connection_string()),
+            quoted(&login.postgres_string()),
             alias(name)
-        ))
+        ),
+        DatabaseKind::Mysql => {
+            let secret = quoted_name(&format!("secret_{name}"));
+            format!(
+                "{}ATTACH '' AS {} (TYPE mysql, SECRET {secret}, READ_ONLY);",
+                login.mysql_secret(&secret),
+                alias(name)
+            )
+        }
+    };
+    connection
+        .execute_batch(&sql)
         .map_err(|error| unreachable_database(&error, login))
 }
 
-// DuckDB quotes the whole connection string in its errors, password included.
-fn without_password(message: &str, login: &PostgresLogin) -> String {
-    let hidden = PostgresLogin {
-        password: "(hidden)".to_owned(),
-        ..login.clone()
-    };
-    message.replace(&login.connection_string(), &hidden.connection_string())
+// Postgres errors quote the whole connection string, password included.
+fn without_password(message: &str, login: &DatabaseLogin) -> String {
+    if login.password.is_empty() {
+        return message.to_owned();
+    }
+    let escaped = login.password.replace('\\', "\\\\").replace('\'', "\\'");
+    message
+        .replace(&escaped, "(hidden)")
+        .replace(&login.password, "(hidden)")
 }
 
-fn unreachable_database(error: &duckdb::Error, login: &PostgresLogin) -> Error {
+fn unreachable_database(error: &duckdb::Error, login: &DatabaseLogin) -> Error {
     let message = without_password(&error.to_string(), login);
     eprintln!("Could not connect to the database: {message}");
-    let reason = if message.contains("password authentication failed") {
+    let reason = if message.contains("password authentication failed")
+        || message.contains("Access denied")
+    {
         "The user name or password is wrong."
-    } else if message.contains("does not exist") {
+    } else if message.contains("does not exist") || message.contains("Unknown database") {
         "That database doesn't exist on the server."
-    } else if message.contains("timeout") || message.contains("Connection refused") {
+    } else if message.contains("timeout")
+        || message.contains("Connection refused")
+        || message.contains("Can't connect")
+    {
         "The server didn't answer. Check the host and port, and that you're online."
     } else if message.contains("SSL") {
         "The server and Davis couldn't agree on SSL. Try another SSL setting."
@@ -198,6 +268,17 @@ fn unreachable_database(error: &duckdb::Error, login: &PostgresLogin) -> Error {
         "Check the connection details and try again."
     };
     Error::UnreachableDatabase(reason.to_owned())
+}
+
+fn load(connection: &Connection, kinds: impl IntoIterator<Item = DatabaseKind>) -> Result<()> {
+    let loads: String = kinds
+        .into_iter()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|kind| format!("LOAD {};", kind.extension()))
+        .collect();
+    connection.execute_batch(&format!("{}{loads}", extension_settings()?))?;
+    Ok(())
 }
 
 // Every new engine connection attaches only the databases its tables come from.
@@ -213,7 +294,7 @@ pub(crate) fn attach_sources<'a>(
     if names.is_empty() {
         return Ok(());
     }
-    let logins: Vec<(&str, PostgresLogin)> = names
+    let logins: Vec<(&str, DatabaseLogin)> = names
         .into_iter()
         .map(|name| {
             registry()
@@ -224,18 +305,26 @@ pub(crate) fn attach_sources<'a>(
                 .ok_or(Error::DisconnectedDatabase)
         })
         .collect::<Result<_>>()?;
-    connection.execute_batch(&format!("{}LOAD postgres;", extension_settings()?))?;
+    load(connection, logins.iter().map(|(_, login)| login.kind))?;
     for (name, login) in &logins {
         attach(connection, name, login)?;
     }
     Ok(())
 }
 
-pub fn test_postgres(login: &PostgresLogin) -> Result<Vec<DatabaseTableInfo>> {
+// A MySQL "database" is a schema, so only that one is listed. Postgres lists
+// every schema the user can see, apart from its own catalogs.
+pub fn test_database(login: &DatabaseLogin) -> Result<Vec<DatabaseTableInfo>> {
     let connection = connect()?;
-    connection.execute_batch(&format!("{}LOAD postgres;", extension_settings()?))?;
+    load(&connection, [login.kind])?;
     attach(&connection, "test", login)?;
-    let mut statement = connection.prepare(
+    let schemas = match login.kind {
+        DatabaseKind::Postgres => {
+            "schema_name <> 'information_schema' AND NOT starts_with(schema_name, 'pg_')".to_owned()
+        }
+        DatabaseKind::Mysql => format!("schema_name = {}", quoted(&login.database)),
+    };
+    let mut statement = connection.prepare(&format!(
         "SELECT * FROM (
            SELECT schema_name, table_name, estimated_size FROM duckdb_tables()
            WHERE database_name = 'db_test'
@@ -243,16 +332,16 @@ pub fn test_postgres(login: &PostgresLogin) -> Result<Vec<DatabaseTableInfo>> {
            SELECT schema_name, view_name, NULL FROM duckdb_views()
            WHERE database_name = 'db_test' AND NOT internal
          )
-         WHERE schema_name <> 'information_schema' AND NOT starts_with(schema_name, 'pg_')
-         ORDER BY 1, 2",
-    )?;
+         WHERE {schemas}
+         ORDER BY 1, 2"
+    ))?;
     let tables = statement
         .query_map([], |row| {
             let rows: Option<i64> = row.get(2)?;
             Ok(DatabaseTableInfo {
                 schema: row.get(0)?,
                 table: row.get(1)?,
-                estimated_rows: rows.map(i64::unsigned_abs),
+                estimated_rows: rows.filter(|rows| *rows > 0).map(i64::unsigned_abs),
             })
         })?
         .collect::<duckdb::Result<_>>()?;
@@ -266,20 +355,26 @@ mod tests {
 
     use super::*;
     use crate::query::{FilterRule, QueryTable, TableFilter, run_query};
-    use crate::table::{RowCount, open_remote_table, read_rows};
+    use crate::table::{Encoding, Format, Repair, RowCount, open_remote_table, read_rows};
 
-    static SETUP: Mutex<bool> = Mutex::new(false);
+    static INSTALLED: Mutex<BTreeSet<DatabaseKind>> = Mutex::new(BTreeSet::new());
 
-    // Set DAVIS_TEST_POSTGRES to postgres://user:password@host:port/database,
-    // with crates/core/fixtures/postgres.sql loaded, to run these.
-    fn test_login() -> Option<PostgresLogin> {
-        let url = std::env::var("DAVIS_TEST_POSTGRES").ok()?;
-        let rest = url.strip_prefix("postgres://")?;
+    // Set DAVIS_TEST_POSTGRES to postgres://user:password@host:port/database
+    // and DAVIS_TEST_MYSQL to mysql://..., each loaded with its file in
+    // crates/core/fixtures/, to run the live tests.
+    fn test_login(kind: DatabaseKind) -> Option<DatabaseLogin> {
+        let (variable, scheme) = match kind {
+            DatabaseKind::Postgres => ("DAVIS_TEST_POSTGRES", "postgres://"),
+            DatabaseKind::Mysql => ("DAVIS_TEST_MYSQL", "mysql://"),
+        };
+        let url = std::env::var(variable).ok()?;
+        let rest = url.strip_prefix(scheme)?;
         let (credentials, place) = rest.split_once('@')?;
         let (user, password) = credentials.split_once(':')?;
         let (address, database) = place.split_once('/')?;
         let (host, port) = address.split_once(':')?;
-        let login = PostgresLogin {
+        let login = DatabaseLogin {
+            kind,
             host: host.to_owned(),
             port: port.parse().ok()?,
             database: database.to_owned(),
@@ -287,21 +382,30 @@ mod tests {
             password: password.to_owned(),
             ssl: SslMode::Disable,
         };
-        let mut is_ready = SETUP.lock().unwrap_or_else(PoisonError::into_inner);
-        if !*is_ready {
+        let mut installed = INSTALLED.lock().unwrap_or_else(PoisonError::into_inner);
+        if !installed.contains(&kind) {
             set_extension_folder(&std::env::temp_dir().join("davis-test-extensions"));
-            install_postgres_support().unwrap();
-            *is_ready = true;
+            install_database_support(kind).unwrap();
+            installed.insert(kind);
         }
         Some(login)
     }
 
-    fn remote(connection: &str, table: &str) -> RemoteTable {
-        RemoteTable {
-            connection: connection.to_owned(),
-            schema: "public".to_owned(),
-            table: table.to_owned(),
+    fn schema_of(login: &DatabaseLogin) -> String {
+        match login.kind {
+            DatabaseKind::Postgres => "public".to_owned(),
+            DatabaseKind::Mysql => login.database.clone(),
         }
+    }
+
+    fn open(connection: &str, login: &DatabaseLogin, table: &str) -> crate::OpenedTable {
+        remember_login(connection, login.clone());
+        let remote = RemoteTable {
+            connection: connection.to_owned(),
+            schema: schema_of(login),
+            table: table.to_owned(),
+        };
+        open_remote_table(remote, table.to_owned(), RowCount::Estimated).unwrap()
     }
 
     fn query(tables: &[QueryTable], sql: &str) -> Result<Vec<crate::Row>> {
@@ -312,37 +416,46 @@ mod tests {
         Some(text.to_owned())
     }
 
-    #[test]
-    fn a_login_is_quoted_so_no_value_can_add_settings() {
-        let login = PostgresLogin {
+    fn sample_login(kind: DatabaseKind, password: &str) -> DatabaseLogin {
+        DatabaseLogin {
+            kind,
             host: "db.example.com".to_owned(),
             port: 5432,
             database: "shop".to_owned(),
             user: "o'brien".to_owned(),
-            password: "a b' sslmode=disable \\".to_owned(),
+            password: password.to_owned(),
             ssl: SslMode::Require,
-        };
+        }
+    }
+
+    #[test]
+    fn a_postgres_login_is_quoted_so_no_value_can_add_settings() {
+        let login = sample_login(DatabaseKind::Postgres, "a b' sslmode=disable \\");
 
         assert_eq!(
-            login.connection_string(),
+            login.postgres_string(),
             "host='db.example.com' port=5432 dbname='shop' user='o\\'brien' \
              password='a b\\' sslmode=disable \\\\' sslmode=require connect_timeout=10"
         );
     }
 
     #[test]
+    fn a_mysql_login_goes_in_a_secret_as_plain_strings() {
+        let login = sample_login(DatabaseKind::Mysql, "it's");
+
+        assert_eq!(
+            login.mysql_secret("s"),
+            "CREATE OR REPLACE TEMPORARY SECRET s (TYPE mysql, HOST 'db.example.com', \
+             PORT 5432, DATABASE 'shop', USER 'o''brien', PASSWORD 'it''s', SSL_MODE 'required');"
+        );
+    }
+
+    #[test]
     fn a_logged_failure_never_shows_the_password() {
-        let login = PostgresLogin {
-            host: "127.0.0.1".to_owned(),
-            port: 5432,
-            database: "shop".to_owned(),
-            user: "reader".to_owned(),
-            password: "s3cret'pass".to_owned(),
-            ssl: SslMode::Disable,
-        };
+        let login = sample_login(DatabaseKind::Postgres, "s3cret'pass");
         let failure = format!(
             "IO Error: Unable to connect to Postgres at \"{}\": password authentication failed",
-            login.connection_string()
+            login.postgres_string()
         );
 
         let logged = without_password(&failure, &login);
@@ -354,130 +467,138 @@ mod tests {
 
     #[test]
     fn a_live_table_opens_and_answers_queries() {
-        let Some(login) = test_login() else { return };
-        remember_login("live-open", login);
+        for kind in [DatabaseKind::Postgres, DatabaseKind::Mysql] {
+            let Some(login) = test_login(kind) else {
+                continue;
+            };
+            let table = open(&format!("open-{kind:?}"), &login, "orders");
+            let tables = [QueryTable::new("orders", table.source.clone())];
 
-        let table = open_remote_table(
-            remote("live-open", "orders"),
-            "orders".to_owned(),
-            RowCount::Exact,
-        )
-        .unwrap();
-        let tables = [QueryTable::new("orders", table.source.clone())];
-
-        assert_eq!(table.row_count, 3);
-        assert_eq!(read_rows(&table.source, 0, 10).unwrap().len(), 3);
-        assert_eq!(
-            query(&tables, "SELECT sum(amount)::VARCHAR FROM orders").unwrap(),
-            [[cell("35.50")]]
-        );
+            assert_eq!(table.row_count, 3, "{kind:?}");
+            assert_eq!(read_rows(&table.source, 0, 10).unwrap().len(), 3);
+            assert_eq!(
+                query(&tables, "SELECT sum(amount)::VARCHAR FROM orders").unwrap(),
+                [[cell("35.50")]],
+                "{kind:?}"
+            );
+        }
     }
 
     #[test]
     fn a_filter_narrows_a_live_table() {
-        let Some(login) = test_login() else { return };
-        remember_login("live-filter", login);
-        let table = open_remote_table(
-            remote("live-filter", "customers"),
-            "customers".to_owned(),
-            RowCount::Estimated,
-        )
-        .unwrap();
-        let mut customers = QueryTable::new("customers", table.source);
-        customers.filters.push(TableFilter {
-            column: "region".to_owned(),
-            rule: FilterRule::OneOf(vec!["APAC".to_owned()]),
-            through: None,
-        });
+        for kind in [DatabaseKind::Postgres, DatabaseKind::Mysql] {
+            let Some(login) = test_login(kind) else {
+                continue;
+            };
+            let table = open(&format!("filter-{kind:?}"), &login, "customers");
+            let mut customers = QueryTable::new("customers", table.source);
+            customers.filters.push(TableFilter {
+                column: "region".to_owned(),
+                rule: FilterRule::OneOf(vec!["APAC".to_owned()]),
+                through: None,
+            });
 
-        assert_eq!(
-            query(&[customers], "SELECT name FROM customers").unwrap(),
-            [[cell("Grace")]]
-        );
+            assert_eq!(
+                query(&[customers], "SELECT name FROM customers").unwrap(),
+                [[cell("Grace")]],
+                "{kind:?}"
+            );
+        }
     }
 
     #[test]
     fn nothing_can_change_a_live_database() {
-        let Some(login) = test_login() else { return };
-        remember_login("live-write", login);
-        let table = open_remote_table(
-            remote("live-write", "orders"),
-            "orders".to_owned(),
-            RowCount::Exact,
-        )
-        .unwrap();
-        let tables = [QueryTable::new("orders", table.source)];
+        for kind in [DatabaseKind::Postgres, DatabaseKind::Mysql] {
+            let Some(login) = test_login(kind) else {
+                continue;
+            };
+            let name = format!("write-{kind:?}");
+            let table = open(&name, &login, "orders");
+            let tables = [QueryTable::new("orders", table.source)];
 
-        for sql in [
-            "INSERT INTO orders VALUES (9, 1, '2026-04-01', 1)",
-            "SELECT * FROM postgres_query('db_live-write', 'SELECT 1')",
-            "SELECT * FROM postgres_execute('db_live-write', 'DROP TABLE orders')",
-            "SELECT * FROM POSTGRES_SCAN('x', 'public', 'orders')",
-            "DETACH \"db_live-write\"",
-        ] {
-            let error = query(&tables, sql).unwrap_err();
-            assert_eq!(error.code(), "rejected-query", "{sql}");
+            for sql in [
+                "INSERT INTO orders VALUES (9, 1, '2026-04-01', 1)".to_owned(),
+                format!("SELECT * FROM postgres_query('db_{name}', 'SELECT 1')"),
+                format!("SELECT * FROM postgres_execute('db_{name}', 'DROP TABLE orders')"),
+                format!("SELECT * FROM mysql_query('db_{name}', 'SELECT 1')"),
+                format!("SELECT * FROM MySQL_Execute('db_{name}', 'DROP TABLE orders')"),
+                format!("DETACH \"db_{name}\""),
+            ] {
+                let error = query(&tables, &sql).unwrap_err();
+                assert_eq!(error.code(), "rejected-query", "{kind:?} {sql}");
+            }
+            assert_eq!(
+                query(&tables, "SELECT count(*)::VARCHAR FROM orders").unwrap(),
+                [[cell("3")]],
+                "{kind:?}"
+            );
         }
-        assert_eq!(
-            query(&tables, "SELECT count(*)::VARCHAR FROM orders").unwrap(),
-            [[cell("3")]]
-        );
     }
 
     #[test]
     fn testing_a_login_lists_its_tables_and_views() {
-        let Some(login) = test_login() else { return };
+        for kind in [DatabaseKind::Postgres, DatabaseKind::Mysql] {
+            let Some(login) = test_login(kind) else {
+                continue;
+            };
+            let schema = schema_of(&login);
 
-        let names: Vec<String> = test_postgres(&login)
-            .unwrap()
-            .into_iter()
-            .map(|table| format!("{}.{}", table.schema, table.table))
-            .collect();
+            let names: Vec<String> = test_database(&login)
+                .unwrap()
+                .into_iter()
+                .map(|table| format!("{}.{}", table.schema, table.table))
+                .collect();
 
-        assert_eq!(
-            names,
-            ["public.big_orders", "public.customers", "public.orders"]
-        );
+            assert_eq!(
+                names,
+                [
+                    format!("{schema}.big_orders"),
+                    format!("{schema}.customers"),
+                    format!("{schema}.orders"),
+                ],
+                "{kind:?}"
+            );
+        }
     }
 
     #[test]
     fn a_wrong_password_says_so() {
-        let Some(login) = test_login() else { return };
-        let wrong = PostgresLogin {
-            password: "not-the-password".to_owned(),
-            ..login
-        };
+        for kind in [DatabaseKind::Postgres, DatabaseKind::Mysql] {
+            let Some(login) = test_login(kind) else {
+                continue;
+            };
+            let wrong = DatabaseLogin {
+                password: "not-the-password".to_owned(),
+                ..login
+            };
 
-        let error = test_postgres(&wrong).unwrap_err();
+            let error = test_database(&wrong).unwrap_err();
 
-        assert_eq!(
-            error.to_string(),
-            "Couldn't connect to the database. The user name or password is wrong."
-        );
+            assert_eq!(
+                error.to_string(),
+                "Couldn't connect to the database. The user name or password is wrong.",
+                "{kind:?}"
+            );
+        }
     }
 
     #[test]
     fn a_table_without_its_login_asks_to_reconnect() {
-        let Some(_) = test_login() else { return };
         forget_login("never-remembered");
+        let source = TableSource {
+            path: "public.orders".to_owned(),
+            format: Format::Parquet,
+            encoding: Encoding::Utf8,
+            repair: Repair::None,
+            remote: Some(RemoteTable {
+                connection: "never-remembered".to_owned(),
+                schema: "public".to_owned(),
+                table: "orders".to_owned(),
+            }),
+        };
 
-        let error = read_rows(
-            &open_failure_source(remote("never-remembered", "orders")),
-            0,
-            1,
-        )
-        .unwrap_err();
+        let error = read_rows(&source, 0, 1).unwrap_err();
 
         assert_eq!(error.code(), "disconnected-database");
-    }
-
-    fn open_failure_source(remote: RemoteTable) -> TableSource {
-        TableSource {
-            path: "public.orders".to_owned(),
-            format: crate::table::Format::Parquet,
-            encoding: crate::table::Encoding::Utf8,
-            repair: crate::table::Repair::None,
-            remote: Some(remote),
-        }
     }
 }
