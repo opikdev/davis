@@ -36,6 +36,9 @@ jobs:
       - name: Install the WebDriver tools
         if: runner.os == 'Linux'
         run: cargo install tauri-driver --version 2.1.0 --locked
+      - name: Build Davis with a WebView2 debugging port
+        if: runner.os == 'Windows'
+        run: pnpm tauri build --debug --no-bundle --config "${{ github.workspace }}/e2e/tauri.windows.json"
       - name: Install the Edge driver
         if: runner.os == 'Windows'
         run: |

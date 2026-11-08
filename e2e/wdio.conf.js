@@ -61,9 +61,8 @@ function seedProject() {
   )
 }
 
-function start(command, args, env = process.env) {
+function start(command, args) {
   const child = spawn(command, args, {
-    env,
     stdio: [null, process.stdout, process.stderr],
   })
   child.on("error", (error) => {
@@ -92,17 +91,15 @@ async function waitForUrl(url) {
   throw new Error(`${url} didn't answer within ${START_TIMEOUT_MS / 1000}s`)
 }
 
-// On Windows, tauri-driver never got a WebView2 session in CI (DevToolsActivePort
-// error), so Davis opens a debugging port and the Edge driver attaches to it.
+// Tauri sets its own WebView2 arguments, so WebView2 ignores the debugging
+// port the Edge driver asks for. On Windows, CI builds Davis with
+// tauri.windows.json, which opens the port, and the driver attaches to it.
 async function startDrivers() {
   if (!isWindows) {
     start("tauri-driver", [])
     return
   }
-  start(application, [], {
-    ...process.env,
-    WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${DEBUG_PORT}`,
-  })
+  start(application, [])
   await waitForUrl(`http://127.0.0.1:${DEBUG_PORT}/json/version`)
   start("msedgedriver", [`--port=${DRIVER_PORT}`])
   await waitForUrl(`http://127.0.0.1:${DRIVER_PORT}/status`)
