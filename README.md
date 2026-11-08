@@ -23,7 +23,7 @@ pnpm tauri dev
 
 Davis targets macOS, Windows, and Linux. Connecting real AI tools has only been tried on macOS so far. Windows builds need the [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/), which Windows 11 includes. On Linux, saving API keys needs a Secret Service keyring, such as GNOME Keyring or KWallet.
 
-Release builds aren't code signed yet, so macOS and Windows warn people who open them.
+To install a release, see [Install Davis](docs/install.md). Releases aren't code signed yet, so macOS and Windows warn people the first time they open Davis.
 
 ## Check
 
@@ -31,7 +31,7 @@ Release builds aren't code signed yet, so macOS and Windows warn people who open
 pnpm check
 ```
 
-This runs type checks, lint, and tests for both TypeScript and Rust.
+This runs type checks, lint, and tests for both TypeScript and Rust. CI also opens the built app on Windows and Linux and runs the tests in `e2e/`. `tauri-driver`, which drives the app, doesn't support macOS, so check Mac changes by hand.
 
 ## Build
 
@@ -41,6 +41,8 @@ pnpm tauri build
 
 ## Docs
 
+- [Install Davis](docs/install.md)
+- [Release Davis](docs/release.md)
 - [Architecture](docs/architecture.md)
 - [Add a backend command](docs/add-a-backend-command.md)
 - [Add an AI provider](docs/add-an-ai-provider.md)

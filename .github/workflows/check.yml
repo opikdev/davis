@@ -26,10 +26,27 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libdbus-1-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libdbus-1-dev webkit2gtk-driver xvfb
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           cache: true
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm tauri build --debug
+      - name: Install the WebDriver tools
+        if: runner.os != 'macOS'
+        run: cargo install tauri-driver --version 2.1.0 --locked
+      - name: Install the Edge driver
+        if: runner.os == 'Windows'
+        run: |
+          cargo install --git https://github.com/chippers/msedgedriver-tool --rev 8c4b34f51b45f5cf08013366d703de464ab871d1 --locked
+          msedgedriver-tool.exe
+          echo "$PWD" >> $env:GITHUB_PATH
+      - run: pnpm install --dir e2e --ignore-workspace --frozen-lockfile
+        if: runner.os != 'macOS'
+      - name: Run the app end to end
+        if: runner.os == 'Linux'
+        run: xvfb-run pnpm --dir e2e test
+      - name: Run the app end to end
+        if: runner.os == 'Windows'
+        run: pnpm --dir e2e test
