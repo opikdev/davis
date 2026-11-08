@@ -26,3 +26,6 @@ dist-ssr
 # Rust and Tauri
 /target
 /src-tauri/gen
+
+# End-to-end test screenshots
+/e2e/output

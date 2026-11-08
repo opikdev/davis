@@ -50,3 +50,12 @@ jobs:
       - name: Run the app end to end
         if: runner.os == 'Windows'
         run: pnpm --dir e2e test
+      - name: Show WebView2 data
+        if: failure() && runner.os == 'Windows'
+        run: Get-ChildItem "$env:LOCALAPPDATA\dev.opik.davis" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName
+      - uses: actions/upload-artifact@v4
+        if: failure() && runner.os != 'macOS'
+        with:
+          name: e2e-screenshots-${{ runner.os }}
+          path: e2e/output
+          if-no-files-found: ignore

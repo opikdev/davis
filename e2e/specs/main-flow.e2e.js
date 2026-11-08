@@ -1,11 +1,19 @@
 function button(name) {
-  return $(`//button[starts-with(normalize-space(.), "${name}")]`)
+  return $(
+    `//button[@aria-label="${name}" or starts-with(normalize-space(.), "${name}")]`
+  )
 }
 
-async function waitForText(text) {
+async function waitForText(text, selector = "body") {
   await browser.waitUntil(
-    async () => (await $("body").getText()).includes(text),
-    { timeoutMsg: `"${text}" never showed` }
+    () =>
+      browser.execute(
+        (selector, text) =>
+          document.querySelector(selector)?.textContent.includes(text),
+        selector,
+        text
+      ),
+    { timeoutMsg: `"${text}" never showed in ${selector}` }
   )
 }
 
@@ -13,9 +21,8 @@ describe("Davis", () => {
   it("opens a file from the project", async () => {
     await $('button[title="sales.csv"]').click()
 
-    const rows = $('[aria-label^="Rows of"]')
-    await rows.waitForDisplayed()
-    await browser.waitUntil(async () => (await rows.getText()).includes("APAC"))
+    await $('[aria-label^="Rows of"]').waitForDisplayed()
+    await waitForText("APAC", '[aria-label^="Rows of"]')
   })
 
   it("builds a Page from a starting point", async () => {

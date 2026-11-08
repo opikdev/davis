@@ -19,6 +19,11 @@ function configFolder() {
   return path.join(base, IDENTIFIER)
 }
 
+// Tauri keeps WebView2 data here, and the Edge driver must look in the same place.
+function webviewFolder() {
+  return path.join(process.env.LOCALAPPDATA, IDENTIFIER, "EBWebView")
+}
+
 // Seeding replaces Davis settings, so it only runs on throwaway CI machines.
 function seedProject() {
   if (!process.env.CI) {
@@ -68,6 +73,9 @@ export const config = {
       maxInstances: 1,
       "tauri:options": {
         application: path.resolve(here, "../target/debug", executable),
+        ...(process.platform === "win32" && {
+          webviewOptions: { userDataFolder: webviewFolder() },
+        }),
       },
     },
   ],
@@ -92,6 +100,12 @@ export const config = {
         process.exit(1)
       }
     })
+  },
+
+  afterTest: async (test, context, { passed }) => {
+    if (passed) return
+    fs.mkdirSync(path.join(here, "output"), { recursive: true })
+    await browser.saveScreenshot(path.join(here, "output", `${test.title}.png`))
   },
 
   afterSession: closeTauriDriver,
