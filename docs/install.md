@@ -30,7 +30,7 @@ Download the `-setup.exe`, or the `.msi` if your company installs apps that way.
 | Fedora, openSUSE | `.rpm` | `sudo dnf install ./Davis-<VERSION>-1.x86_64.rpm` |
 | Any other | `.AppImage` | `chmod +x Davis_<VERSION>_amd64.AppImage`, then open it |
 
-To save API keys, Davis needs a Secret Service keyring, such as GNOME Keyring or KWallet. Claude Code, Codex, and OpenCode sign-in doesn't need one.
+To save API keys and database passwords, Davis needs a Secret Service keyring, such as GNOME Keyring or KWallet. Claude Code, Codex, and OpenCode sign-in doesn't need one.
 
 ## Uninstall
 

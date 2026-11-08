@@ -21,7 +21,7 @@ pnpm tauri dev
 
 ## Platforms
 
-Davis targets macOS, Windows, and Linux. Connecting real AI tools has only been tried on macOS so far. Windows builds need the [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/), which Windows 11 includes. On Linux, saving API keys needs a Secret Service keyring, such as GNOME Keyring or KWallet.
+Davis targets macOS, Windows, and Linux. Connecting real AI tools has only been tried on macOS so far. Windows builds need the [WebView2 runtime](https://developer.microsoft.com/microsoft-edge/webview2/), which Windows 11 includes. On Linux, saving API keys and database passwords needs a Secret Service keyring, such as GNOME Keyring or KWallet.
 
 To install a release, see [Install Davis](docs/install.md). Releases aren't code signed yet, so macOS and Windows warn people the first time they open Davis.
 
