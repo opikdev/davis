@@ -138,7 +138,7 @@ export function PageChart({ block, result, onSelect }: PageChartProps) {
       tickLine={false}
       axisLine={false}
       tick={axisText}
-      minTickGap={16}
+      minTickGap={isLine ? 16 : 4}
       padding={isLine ? { left: edgeSpace, right: edgeSpace } : undefined}
     />
   )
